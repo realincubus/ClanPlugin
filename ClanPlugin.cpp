@@ -29,9 +29,17 @@
 #include <sstream>
 #include <map>
 #include <fstream>
+#include <pluto/libpluto.h>
 
 extern "C"{
-int lib_main( int argc, char* argv[], osl_scop_p scop );
+// TODO PlutoProg is not known outside of libpluto
+//      since i want to write my own unparser thats not a big problem but its definitly something i 
+//      want to change temporarily
+//      
+// TODO throw away int lib_main( int argc, char* argv[], osl_scop_p scop );
+int pluto_multicore_codegen(FILE *cloogfp, FILE *outfp, const PlutoProg *prog);
+PlutoProg *scop_to_pluto_prog(osl_scop_p scop, PlutoOptions *options);
+void pluto_prog_free(PlutoProg* prog);
 }
 
 
@@ -299,6 +307,15 @@ public:
     if ( auto target_for_loop = Fixer.getTargetForLoop() ){
       const SourceManager& SM = context.getSourceManager();
       auto scop = handleForLoop( target_for_loop, SM, "outfile.test.scop.change.this." ); 
+      PlutoOptions* pluto_options = pluto_options_alloc();
+      pluto_options->parallel = true;
+      pluto_schedule_osl( scop, pluto_options );
+      auto prog = scop_to_pluto_prog(scop, options);
+      FILE* cloogfp = fopen("cloogp", "w");;
+      FILE* outfp = fopen("cprog", "w");
+      pluto_multicore_codegen(cloogfp, outfp, prog);
+
+      pluto_prog_free(prog);
 #if 0
       if ( scop ) {
 	int argc = 3;
@@ -306,6 +323,38 @@ public:
 	lib_main(argc, argv, scop);
       }
 #endif
+
+#if 0
+// TODO this has to go somewhere else
+      ifstream in("temporaries.scop.c");
+      if ( !in.good() ) return;
+      string line;
+      bool extract = false;
+      string optimized_replacement = "";
+      while ( getline(in, line ) ) {
+        out << "read: " << line << endl;
+        if ( line == "/* We do not support C11 <threads.h>.  */" )
+        { 
+          extract = true;
+          continue;
+        } 
+        if ( line == "/* End of CLooG code */" )
+        { 
+          extract = false;
+          continue;
+        } 
+        if ( line == "/* Start of CLooG code */" ) {
+          // skip this useless comment
+          continue;
+        } 
+        if ( extract ) {
+            out << line << endl;
+            optimized_replacement += line + string("\n");
+        } 
+      }
+#endif
+
+
       DiagnosticsEngine &D = Instance.getDiagnostics();
         unsigned DiagID = D.getCustomDiagID(DiagnosticsEngine::Warning, "found a scop");
 	D.Report(target_for_loop->getLocStart(), DiagID) 
