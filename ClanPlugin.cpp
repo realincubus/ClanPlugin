@@ -21,25 +21,26 @@
 #include "llvm/Support/raw_ostream.h"
 #include <fstream>
 #include <chrono>
-#include <clan/clan.h>
-#include <osl/scop.h>
-#include <osl/extensions/irregular.h>
+//#include <clan/clan.h>
+//#include <osl/scop.h>
+//#include <osl/extensions/irregular.h>
 #include "clang/ASTMatchers/ASTMatchFinder.h"
 #include <iostream>
 #include <sstream>
 #include <map>
 #include <fstream>
 #include <pluto/libpluto.h>
+#include <pluto.h>
+#include <string>
 
 extern "C"{
 // TODO PlutoProg is not known outside of libpluto
 //      since i want to write my own unparser thats not a big problem but its definitly something i 
 //      want to change temporarily
 //      
-// TODO throw away int lib_main( int argc, char* argv[], osl_scop_p scop );
 //int pluto_multicore_codegen(FILE *cloogfp, FILE *outfp, const PlutoProg *prog);
-//PlutoProg *scop_to_pluto_prog(osl_scop_p scop, PlutoOptions *options);
-//void pluto_prog_free(PlutoProg* prog);
+PlutoProg *scop_to_pluto_prog(osl_scop_p scop, PlutoOptions *options);
+void pluto_prog_free(PlutoProg* prog);
 }
 
 
@@ -305,32 +306,91 @@ public:
     std::cout << "optimize it "<< std::endl;
     out << "optimize it "<< std::endl;
     if ( auto target_for_loop = Fixer.getTargetForLoop() ){
-      const SourceManager& SM = context.getSourceManager();
-      auto scop = handleForLoop( target_for_loop, SM, "outfile.test.scop.change.this." ); 
-      PlutoOptions* pluto_options = pluto_options_alloc();
-      pluto_options->parallel = true;
-      pluto_schedule_osl( scop, pluto_options );
 #if 0
-      auto prog = scop_to_pluto_prog(scop, options);
-      FILE* cloogfp = fopen("cloogp", "w");;
-      FILE* outfp = fopen("cprog", "w");
-      // NOTE: if know this symbol (function) is in the library but i have no header to use it
-      pluto_multicore_codegen(cloogfp, outfp, prog);
-      pluto_prog_free(prog);
-#endif
-#if 0
-      if ( scop ) {
-	int argc = 3;
-	char* argv[argc] = { "pluto", "temporaries.scop", "--parallel"};
-	lib_main(argc, argv, scop);
+      static bool once = true;
+      if ( once ) {
+	once = false;
+      }else{
+	return;
       }
 #endif
+      const SourceManager& SM = context.getSourceManager();
+      auto scop = handleForLoop( target_for_loop, SM, "outfile.test.scop.change.this." ); 
+      // if we where able to extract a scop from this loop handle it
+      if ( scop ) {
+	PlutoOptions* pluto_options = pluto_options_alloc();
+	pluto_options->parallel = true;
+	pluto_schedule_osl( scop, pluto_options );
+#if 1
+	std::cout << "generating pluto program from scop" << std::endl;
+	auto prog = scop_to_pluto_prog(scop, pluto_options);
+	FILE* cloogfp = fopen("cloogp", "w+");
+	FILE* outfp = fopen("cprog", "w");
+	std::cout << "writing cloog file" << std::endl;
+	pluto_gen_cloog_file(cloogfp, prog);
+	std::cout << "done writing cloog file" << std::endl;
+	fclose(cloogfp);
+	cloogfp = fopen("cloogp", "r");
+	std::cout << "done rewinding" << std::endl;
+	// NOTE: if know this symbol (function) is in the library but i have no header to use it
+	std::cout << "generating cloog code" << std::endl;
+	pluto_multicore_codegen(cloogfp, outfp, prog);
+	std::cout << "done generating cloog code" << std::endl;
+	pluto_prog_free(prog);
 
-      DiagnosticsEngine &D = Instance.getDiagnostics();
-        unsigned DiagID = D.getCustomDiagID(DiagnosticsEngine::Warning, "found a scop");
-	D.Report(target_for_loop->getLocStart(), DiagID) 
-	<< FixItHint::CreateReplacement(SourceRange(target_for_loop->getLocStart(),target_for_loop->getLocEnd()), "test ");
+	fclose( outfp );
+	fclose( cloogfp );
+#endif
 
+	std::ifstream in("cprog");
+	assert( in.good() );
+
+
+	// very bad hack section
+#if 1
+	{
+	  std::string repl;
+	  std::string line;
+	  bool skip = true;
+	  int ctr = 0;
+	  // FIXME temporary hack to get the right content from the cprog file
+	  while( std::getline( in, line ) ){
+	    // skip the first line with the omp header
+	    ctr++;
+	    if ( ctr == 1 ) {
+	      skip = false;
+	      continue;
+	    }
+	    // dont read its content after this line
+	    if ( line == "/* End of CLooG code */" ) skip = true;
+	    if ( skip ) continue;
+	    repl += line + "\n";
+	  }
+	  in.close();
+	  // write the content back to the file
+	  std::ofstream out("cprog");
+	  out << repl ;
+	  out.close();
+	  // now the worst of all run gcc and expand all macros
+	  system("gcc -E -P -x c cprog > cprog_expanded");
+
+	}
+	// read the file back in
+	in.open("cprog_expanded");
+	// reads the whole file
+	std::string repl((
+	    std::istreambuf_iterator<char>(in)),
+	    std::istreambuf_iterator<char>()
+	);
+#endif
+
+	std::cout << "emitting diagnositc" << std::endl;
+	DiagnosticsEngine &D = Instance.getDiagnostics();
+	  unsigned DiagID = D.getCustomDiagID(DiagnosticsEngine::Warning, "found a scop");
+	  D.Report(target_for_loop->getLocStart(), DiagID) 
+	  << FixItHint::CreateReplacement(SourceRange(target_for_loop->getLocStart(),target_for_loop->getLocEnd()), repl.c_str() );
+
+      }
     }
     out << "exiting normaly "<< std::endl;
     out.close();
