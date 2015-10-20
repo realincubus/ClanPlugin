@@ -327,7 +327,7 @@ public:
 	std::cout << "generating pluto program from scop" << std::endl;
 	auto prog = scop_to_pluto_prog(scop, pluto_options);
 	FILE* cloogfp = fopen("cloogp", "w+");
-	FILE* outfp = fopen("cprog", "w");
+	std::ofstream outfp( "cprog" );
 	std::cout << "writing cloog file" << std::endl;
 	pluto_gen_cloog_file(cloogfp, prog);
 	std::cout << "done writing cloog file" << std::endl;
@@ -340,7 +340,7 @@ public:
 	std::cout << "done generating cloog code" << std::endl;
 	pluto_prog_free(prog);
 
-	fclose( outfp );
+	//fclose( outfp );
 	fclose( cloogfp );
 #endif
 
