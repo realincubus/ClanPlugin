@@ -327,7 +327,6 @@ public:
 	std::cout << "generating pluto program from scop" << std::endl;
 	auto prog = scop_to_pluto_prog(scop, pluto_options);
 	FILE* cloogfp = fopen("cloogp", "w+");
-	std::ofstream outfp( "cprog" );
 	std::cout << "writing cloog file" << std::endl;
 	pluto_gen_cloog_file(cloogfp, prog);
 	std::cout << "done writing cloog file" << std::endl;
@@ -336,17 +335,27 @@ public:
 	std::cout << "done rewinding" << std::endl;
 	// NOTE: if know this symbol (function) is in the library but i have no header to use it
 	std::cout << "generating cloog code" << std::endl;
+	// switch between my clast printing or plutos 
+#if 0
+	FILE* outfp = fopen( "cprog", "w" );
+	pluto_multicore_codegen(cloogfp, outfp, prog);
+	fclose( outfp );
+#else
+	std::stringstream outfp;
 	pluto_codegen_clang::pluto_multicore_codegen(cloogfp, outfp, prog);
+	// TODO delete this after the rest of the parsing was adapted to stringstream
+	std::ofstream temporary_output("cprog");
+	temporary_output << outfp.str();
+	temporary_output.close();
+#endif
 	std::cout << "done generating cloog code" << std::endl;
 	pluto_prog_free(prog);
 
-	//fclose( outfp );
 	fclose( cloogfp );
 #endif
 
 	std::ifstream in("cprog");
 	assert( in.good() );
-
 
 #if 1
 	// very bad hack section
