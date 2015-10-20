@@ -32,6 +32,7 @@
 #include <pluto/libpluto.h>
 #include <pluto.h>
 #include <string>
+#include <pluto_codegen_clang.hpp>
 
 extern "C"{
 // TODO PlutoProg is not known outside of libpluto
@@ -42,6 +43,7 @@ extern "C"{
 PlutoProg *scop_to_pluto_prog(osl_scop_p scop, PlutoOptions *options);
 void pluto_prog_free(PlutoProg* prog);
 }
+
 
 
 using namespace clang;
@@ -334,7 +336,7 @@ public:
 	std::cout << "done rewinding" << std::endl;
 	// NOTE: if know this symbol (function) is in the library but i have no header to use it
 	std::cout << "generating cloog code" << std::endl;
-	pluto_multicore_codegen(cloogfp, outfp, prog);
+	pluto_codegen_clang::pluto_multicore_codegen(cloogfp, outfp, prog);
 	std::cout << "done generating cloog code" << std::endl;
 	pluto_prog_free(prog);
 
@@ -346,14 +348,14 @@ public:
 	assert( in.good() );
 
 
-	// very bad hack section
 #if 1
+	// very bad hack section
+	// FIXME temporary hack to get the right content from the cprog file
 	{
 	  std::string repl;
 	  std::string line;
 	  bool skip = true;
 	  int ctr = 0;
-	  // FIXME temporary hack to get the right content from the cprog file
 	  while( std::getline( in, line ) ){
 	    // skip the first line with the omp header
 	    ctr++;
