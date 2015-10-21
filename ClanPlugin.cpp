@@ -49,7 +49,8 @@ void pluto_prog_free(PlutoProg* prog);
 using namespace clang;
 using namespace clang::ast_matchers;
 
-osl_scop_p handleForLoop( const ForStmt* for_stmt, const SourceManager& SM, std::string filename );
+// TODO make header
+osl_scop_p handleForLoop( const ForStmt* for_stmt, const SourceManager& SM, std::string filename, std::vector<std::pair<SourceRange,std::string>>& messages );
 
 
 const char* SCOP_ID = "scop";
@@ -318,7 +319,21 @@ public:
 #endif
 #define USE_PLUTO_CODEGEN 0
       const SourceManager& SM = context.getSourceManager();
-      auto scop = handleForLoop( target_for_loop, SM, "outfile.test.scop.change.this." ); 
+      std::vector<std::pair<SourceRange, std::string>> messages;
+      auto scop = handleForLoop( target_for_loop, SM, "outfile.test.scop.change.this.", messages ); 
+      for( auto&& message : messages ){
+	
+	// dirty hack to get clang to do what i want
+	const char a[2000] = "";
+	sprintf((char*)a, message.second.c_str() );
+
+	// TODO dont use a fixithint 
+	DiagnosticsEngine &D = Instance.getDiagnostics();
+	    unsigned DiagID = D.getCustomDiagID(DiagnosticsEngine::Warning, a );
+	    D.Report(message.first.getBegin(), DiagID) << message.second ;//<< FixItHint::CreateReplacement(SourceRange(message.first.getBegin(),message.first.getEnd()), "" );
+
+      }
+
       // if we where able to extract a scop from this loop handle it
       if ( scop ) {
 	PlutoOptions* pluto_options = pluto_options_alloc();
