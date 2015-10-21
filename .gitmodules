@@ -1,3 +1,6 @@
 [submodule "pluto_codegen_clang"]
 	path = pluto_codegen_clang
 	url = https://github.com/realincubus/pluto_codegen_clang.git
+[submodule "clan"]
+	path = clan
+	url = https://github.com/realincubus/clan.git
