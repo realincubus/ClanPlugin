@@ -9,6 +9,9 @@ if( NOT MSVC ) # MSVC mangles symbols differently, and
   endif()
 endif()
 
+
+add_subdirectory( pluto_codegen_clang )
+
 add_llvm_loadable_module(ClanPlugin ClanPlugin.cpp)
 target_link_libraries( ClanPlugin clangASTMatchers clan-clang.a pluto cloog-isl polylib64 libclang pluto_codegen_clang )
 
