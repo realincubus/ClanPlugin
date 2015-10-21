@@ -316,6 +316,7 @@ public:
 	return;
       }
 #endif
+#define USE_PLUTO_CODEGEN 0
       const SourceManager& SM = context.getSourceManager();
       auto scop = handleForLoop( target_for_loop, SM, "outfile.test.scop.change.this." ); 
       // if we where able to extract a scop from this loop handle it
@@ -323,10 +324,13 @@ public:
 	PlutoOptions* pluto_options = pluto_options_alloc();
 	pluto_options->parallel = true;
 	pluto_schedule_osl( scop, pluto_options );
-#if 1
+
 	std::cout << "generating pluto program from scop" << std::endl;
 	auto prog = scop_to_pluto_prog(scop, pluto_options);
-	FILE* cloogfp = fopen("cloogp", "w+");
+	FILE* cloogfp = nullptr;
+	// switch between my clast printing or plutos 
+#if USE_PLUTO_CODEGEN
+	cloogfp = fopen("cloogp", "w+");
 	std::cout << "writing cloog file" << std::endl;
 	pluto_gen_cloog_file(cloogfp, prog);
 	std::cout << "done writing cloog file" << std::endl;
@@ -335,15 +339,14 @@ public:
 	std::cout << "done rewinding" << std::endl;
 	// NOTE: if know this symbol (function) is in the library but i have no header to use it
 	std::cout << "generating cloog code" << std::endl;
-	// switch between my clast printing or plutos 
-#if 0
+
 	FILE* outfp = fopen( "cprog", "w" );
 	pluto_multicore_codegen(cloogfp, outfp, prog);
 	fclose( outfp );
 #else
 	std::stringstream outfp;
-	pluto_codegen_clang::pluto_multicore_codegen(cloogfp, outfp, prog);
-	// TODO delete this after the rest of the parsing was adapted to stringstream
+	pluto_codegen_clang::pluto_multicore_codegen(cloogfp, outfp, prog, scop);
+	// TODO this is needed because gcc still does the preprocessing step with this file
 	std::ofstream temporary_output("cprog");
 	temporary_output << outfp.str();
 	temporary_output.close();
@@ -351,6 +354,7 @@ public:
 	std::cout << "done generating cloog code" << std::endl;
 	pluto_prog_free(prog);
 
+#if USE_PLUTO_CODEGEN
 	fclose( cloogfp );
 #endif
 
