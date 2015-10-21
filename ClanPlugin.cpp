@@ -342,9 +342,9 @@ public:
 
 	std::cout << "generating pluto program from scop" << std::endl;
 	auto prog = scop_to_pluto_prog(scop, pluto_options);
-	FILE* cloogfp = nullptr;
 	// switch between my clast printing or plutos 
 #if USE_PLUTO_CODEGEN
+	FILE* cloogfp = nullptr;
 	cloogfp = fopen("cloogp", "w+");
 	std::cout << "writing cloog file" << std::endl;
 	pluto_gen_cloog_file(cloogfp, prog);
@@ -360,7 +360,7 @@ public:
 	fclose( outfp );
 #else
 	std::stringstream outfp;
-	pluto_codegen_clang::pluto_multicore_codegen(cloogfp, outfp, prog, scop);
+	pluto_codegen_clang::pluto_multicore_codegen( outfp, prog, scop);
 	// TODO this is needed because gcc still does the preprocessing step with this file
 	std::ofstream temporary_output("cprog");
 	temporary_output << outfp.str();
