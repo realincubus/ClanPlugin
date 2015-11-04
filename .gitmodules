@@ -4,3 +4,6 @@
 [submodule "clan"]
 	path = clan
 	url = https://github.com/realincubus/clan.git
+[submodule "pluto"]
+	path = pluto
+	url = https://github.com/realincubus/pluto_clang.git

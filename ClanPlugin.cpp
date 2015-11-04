@@ -30,9 +30,13 @@
 #include <map>
 #include <fstream>
 #include <pluto/libpluto.h>
-#include <pluto.h>
 #include <string>
 #include <pluto_codegen_clang.hpp>
+#include <thread>
+#include <signal.h>
+#include <setjmp.h>
+#include <map>
+#include <clang/AST/AST.h>
 
 extern "C"{
 // TODO PlutoProg is not known outside of libpluto
@@ -42,6 +46,8 @@ extern "C"{
 //int pluto_multicore_codegen(FILE *cloogfp, FILE *outfp, const PlutoProg *prog);
 PlutoProg *scop_to_pluto_prog(osl_scop_p scop, PlutoOptions *options);
 void pluto_prog_free(PlutoProg* prog);
+int pluto_stmt_is_member_of(int stmt_id, Stmt **slist, int len);
+//Ploop **pluto_get_all_loops(const PlutoProg *prog, int *num);
 }
 
 
@@ -50,7 +56,7 @@ using namespace clang;
 using namespace clang::ast_matchers;
 
 // TODO make header
-osl_scop_p handleForLoop( const ForStmt* for_stmt, const SourceManager& SM, std::string filename, std::vector<std::pair<SourceRange,std::string>>& messages );
+osl_scop_p handleForLoop( const ForStmt* for_stmt, const SourceManager& SM, std::string filename, std::vector<std::pair<SourceRange,std::string>>& messages, std::vector<std::string>& statement_texts, std::map<osl_statement_p,const clang::Stmt*>& osl_to_clang );
 
 
 const char* SCOP_ID = "scop";
@@ -66,6 +72,16 @@ const char* CEILD_ID = "ceild";
 const char* FLOORD_ID = "floord";
 
 std::ofstream out;
+
+
+jmp_buf env;
+int restore_point = 0;
+int restore_error = false;
+void signalHandler(int signum) {
+  std::cout << "Signal " << signum << " received" << std::endl;
+  restore_error = true;
+  longjmp(env, 1);
+}
 
 namespace {
 
@@ -149,9 +165,9 @@ public:
 	hasCondition(
 	  makeLoopConditionMatcher()
 	),
-	hasIncrement(
-	  makeLoopStrideMatcher()
-	),
+	//hasIncrement(
+	//  makeLoopStrideMatcher()
+	//),
 	unless(
 	  hasAncestor(
 	    forStmt()
@@ -192,6 +208,66 @@ public:
     return statement_to_weight;
   }
 
+  bool is_loop_parallel( PlutoProg* prog, Ploop* loop) {
+    std::cout << __PRETTY_FUNCTION__ << std::endl;
+     bool parallel, i;
+
+      /* All statements under a parallel loop should be of type orig */
+      for (i=0; i<loop->nstmts; i++) {
+	  if (loop->stmts[i]->type != ORIG) break;
+      }
+      if (i<loop->nstmts) {
+	  return false;
+      }
+
+      if (prog->hProps[loop->depth].dep_prop == PARALLEL) {
+	  return true;
+      }
+
+      parallel = true;
+
+      for (int i=0; i<prog->ndeps; i++) {
+	  printf("dep %d ", i);
+	  Dep *dep = prog->deps[i];
+	  if (IS_RAR(dep->type)) {
+	    printf("is rar\n");
+	    continue;
+	  }
+	  assert(dep->satvec != NULL);
+	  if (pluto_stmt_is_member_of(prog->stmts[dep->src]->id, loop->stmts, loop->nstmts)
+		  && pluto_stmt_is_member_of(prog->stmts[dep->dest]->id, loop->stmts,
+		      loop->nstmts)) {
+	      printf("both are members of the loops statements: ");
+	      if (dep->satvec[loop->depth]) {
+		  printf("satvec is != 0 at loop->depth %d\n",loop->depth);
+		  parallel = 0;
+		  printf("setting parallel to 0\n");
+		  break;
+	      }
+	      printf("\n");
+	  }
+      }
+
+      printf("pluto_loop_is_parallel returning %d\n",parallel);
+      return parallel;
+       
+  }
+
+  void explain_program( PlutoProg* prog ) {
+    int nloops = 0;
+    std::cout << "get all loops" << std::endl;
+    // TODO cant call this function because we have c++ linkage 
+    Ploop** loops = pluto_get_all_loops( prog, &nloops);
+    std::cout << "done" << std::endl;
+    
+    for ( int i = 0; i < nloops; i++) {
+      if (is_loop_parallel(prog, loops[i])) {
+
+      }
+    }
+
+  }
+
   void HandleTranslationUnit(ASTContext& context) override {
     
     // TODO call the initialization functions for clan-clang here !!!
@@ -207,6 +283,7 @@ public:
       { 
       }
 
+      // TODO filter loops in (system)-headers 
       void handleForLoops( const MatchFinder::MatchResult &Result ){
 	std::cout << __PRETTY_FUNCTION__ << std::endl;
 	const auto* for_loop = Result.Nodes.getNodeAs<ForStmt>(FOR_LOOP_ID);
@@ -306,120 +383,71 @@ public:
     out << "select a target loop "<< std::endl;
     Fixer.select_target_loop();
 
+    // TODO remove this stuff
+    signal(SIGABRT, signalHandler);
+
     std::cout << "optimize it "<< std::endl;
     out << "optimize it "<< std::endl;
     if ( auto target_for_loop = Fixer.getTargetForLoop() ){
-#if 0
-      static bool once = true;
-      if ( once ) {
-	once = false;
-      }else{
-	return;
-      }
-#endif
-#define USE_PLUTO_CODEGEN 0
+
+      std::vector<std::string> statement_texts;
       const SourceManager& SM = context.getSourceManager();
       std::vector<std::pair<SourceRange, std::string>> messages;
-      auto scop = handleForLoop( target_for_loop, SM, "outfile.test.scop.change.this.", messages ); 
+      std::map<osl_statement_p,const clang::Stmt*> osl_to_clang;
+      auto scop = handleForLoop( target_for_loop, SM, "outfile.test.scop.change.this.", messages, statement_texts, osl_to_clang ); 
+      // emit all the messages we got from the analysis
       for( auto&& message : messages ){
 	
 	// dirty hack to get clang to do what i want
 	const char a[2000] = "";
 	sprintf((char*)a, message.second.c_str() );
 
-	// TODO dont use a fixithint 
 	DiagnosticsEngine &D = Instance.getDiagnostics();
 	    unsigned DiagID = D.getCustomDiagID(DiagnosticsEngine::Warning, a );
-	    D.Report(message.first.getBegin(), DiagID) << message.second ;//<< FixItHint::CreateReplacement(SourceRange(message.first.getBegin(),message.first.getEnd()), "" );
+	    D.Report(message.first.getBegin(), DiagID) << message.second;
 
       }
 
-      // if we where able to extract a scop from this loop handle it
+      // if we where able to extract a scop from this loop. handle it
       if ( scop ) {
-	PlutoOptions* pluto_options = pluto_options_alloc();
-	pluto_options->parallel = true;
-	pluto_schedule_osl( scop, pluto_options );
 
-	std::cout << "generating pluto program from scop" << std::endl;
-	auto prog = scop_to_pluto_prog(scop, pluto_options);
-	// switch between my clast printing or plutos 
-#if USE_PLUTO_CODEGEN
-	FILE* cloogfp = nullptr;
-	cloogfp = fopen("cloogp", "w+");
-	std::cout << "writing cloog file" << std::endl;
-	pluto_gen_cloog_file(cloogfp, prog);
-	std::cout << "done writing cloog file" << std::endl;
-	fclose(cloogfp);
-	cloogfp = fopen("cloogp", "r");
-	std::cout << "done rewinding" << std::endl;
-	// NOTE: if know this symbol (function) is in the library but i have no header to use it
-	std::cout << "generating cloog code" << std::endl;
+	std::thread generator_thread( [&](){
 
-	FILE* outfp = fopen( "cprog", "w" );
-	pluto_multicore_codegen(cloogfp, outfp, prog);
-	fclose( outfp );
-#else
-	std::stringstream outfp;
-	pluto_codegen_clang::pluto_multicore_codegen( outfp, prog, scop);
-	// TODO this is needed because gcc still does the preprocessing step with this file
-	std::ofstream temporary_output("cprog");
-	temporary_output << outfp.str();
-	temporary_output.close();
-#endif
-	std::cout << "done generating cloog code" << std::endl;
-	pluto_prog_free(prog);
+	  restore_point = setjmp(env);
 
-#if USE_PLUTO_CODEGEN
-	fclose( cloogfp );
-#endif
-
-	std::ifstream in("cprog");
-	assert( in.good() );
-
-#if 1
-	// very bad hack section
-	// FIXME temporary hack to get the right content from the cprog file
-	{
-	  std::string repl;
-	  std::string line;
-	  bool skip = true;
-	  int ctr = 0;
-	  while( std::getline( in, line ) ){
-	    // skip the first line with the omp header
-	    ctr++;
-	    if ( ctr == 1 ) {
-	      skip = false;
-	      continue;
-	    }
-	    // dont read its content after this line
-	    if ( line == "/* End of CLooG code */" ) skip = true;
-	    if ( skip ) continue;
-	    repl += line + "\n";
+	  if ( restore_error ) {
+	    std::cout << "there was an error in generating a new scop" << std::endl;
+	    return;
 	  }
-	  in.close();
-	  // write the content back to the file
-	  std::ofstream out("cprog");
-	  out << repl ;
-	  out.close();
-	  // now the worst of all run gcc and expand all macros
-	  system("gcc -E -P -x c cprog > cprog_expanded");
 
-	}
-	// read the file back in
-	in.open("cprog_expanded");
-	// reads the whole file
-	std::string repl((
-	    std::istreambuf_iterator<char>(in)),
-	    std::istreambuf_iterator<char>()
-	);
-#endif
+	  PlutoOptions* pluto_options = pluto_options_alloc(); // memory leak if something goes wrong
+	  pluto_options->parallel = true;
+	  pluto_schedule_osl( scop, pluto_options );
 
-	std::cout << "emitting diagnositc" << std::endl;
-	DiagnosticsEngine &D = Instance.getDiagnostics();
-	  unsigned DiagID = D.getCustomDiagID(DiagnosticsEngine::Warning, "found a scop");
-	  D.Report(target_for_loop->getLocStart(), DiagID) 
-	  << FixItHint::CreateReplacement(SourceRange(target_for_loop->getLocStart(),target_for_loop->getLocEnd()), repl.c_str() );
+	  std::cout << "generating pluto program from scop" << std::endl;
+	  auto prog = scop_to_pluto_prog(scop, pluto_options);
 
+
+	  std::stringstream outfp;
+	  pluto_codegen_clang::pluto_multicore_codegen( outfp, prog, scop, statement_texts);
+
+	  //std::cout << "try to explain why something is not parallel" << std::endl;
+	  //explain_program( prog );
+
+	  std::cout << "done generating cloog code" << std::endl;
+	  pluto_prog_free(prog);
+
+	  std::string repl = outfp.str();
+
+	  std::cout << "emitting diagnositc" << std::endl;
+	  DiagnosticsEngine &D = Instance.getDiagnostics();
+	    unsigned DiagID = D.getCustomDiagID(DiagnosticsEngine::Warning, "found a scop");
+	    D.Report(target_for_loop->getLocStart(), DiagID) 
+	    << FixItHint::CreateReplacement(SourceRange(target_for_loop->getLocStart(),target_for_loop->getLocEnd()), repl.c_str() );
+
+	}); // thread lambda end;
+
+	generator_thread.join();
       }
     }
     out << "exiting normaly "<< std::endl;
