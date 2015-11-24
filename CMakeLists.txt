@@ -9,16 +9,14 @@ if( NOT MSVC ) # MSVC mangles symbols differently, and
   endif()
 endif()
 
-add_library( osl SHARED IMPORTED)
-set_property(TARGET osl PROPERTY IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/pluto_src/openscop/.libs/libosl.so)
-
+#add_library( osl SHARED IMPORTED)
+#set_property(TARGET osl PROPERTY IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/pluto_src/openscop/.libs/libosl.so)
 
 add_library( cloog-isl SHARED IMPORTED)
 set_property(TARGET cloog-isl PROPERTY IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/pluto_src/cloog-isl/.libs/libcloog-isl.so)
 
 
 include_directories( pluto_src/cloog-isl/include )
-include_directories( pluto_src/openscop/include )
 include_directories( pluto_src/candl/include )
 include_directories( pluto_src/piplib/include )
 include_directories( pluto_src/include )
@@ -63,6 +61,8 @@ set_property(TARGET pluto PROPERTY IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}
 
 #needed includes for my superset library
 
+
+include_directories( pluto_src/openscop/include )
 
 # TODO move this into a separate project
 # this is needed to get some functions from pluto that are not build with the normal libpluto

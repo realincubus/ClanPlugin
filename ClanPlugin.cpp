@@ -47,6 +47,7 @@ extern "C"{
 PlutoProg *scop_to_pluto_prog(osl_scop_p scop, PlutoOptions *options);
 void pluto_prog_free(PlutoProg* prog);
 int pluto_stmt_is_member_of(int stmt_id, Stmt **slist, int len);
+void pluto_detect_transformation_properties(PlutoProg *prog);
 //Ploop **pluto_get_all_loops(const PlutoProg *prog, int *num);
 }
 
@@ -422,11 +423,23 @@ public:
 
 	  PlutoOptions* pluto_options = pluto_options_alloc(); // memory leak if something goes wrong
 	  pluto_options->parallel = true;
-	  pluto_schedule_osl( scop, pluto_options );
+	  pluto_options->debug = true;
+  	  pluto_options->isldep = true;
+	  // TODO this is a catastrophe !!!!! remove it
+	  options = pluto_options;
+	  //pluto_schedule_osl( scop, pluto_options );
+	  FILE* temp = fopen("debug.scop", "w" );
+	  osl_scop_print( temp, scop );
+	  fclose( temp );
 
 	  std::cout << "generating pluto program from scop" << std::endl;
 	  auto prog = scop_to_pluto_prog(scop, pluto_options);
+	  std::cout << "done generating pluto program from scop" << std::endl;
 
+	  std::cout << "computing prallelization possibilities" << std::endl;
+	  pluto_detect_transformation_properties(prog);
+	  std::cout << "computing prallelization possibilities done " << std::endl;
+	  std::cout << "ClanPlugin " << prog->ndeps << std::endl;
 
 	  std::stringstream outfp;
 	  pluto_codegen_clang::pluto_multicore_codegen( outfp, prog, scop, statement_texts);
