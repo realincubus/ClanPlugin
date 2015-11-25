@@ -27,20 +27,20 @@ add_subdirectory( pluto_codegen_clang )
 include_directories( pluto_codegen_clang )
 include_directories( pluto_src/src )
 
-include(ExternalProject)
+#include(ExternalProject)
 
-ExternalProject_Add( pluto_clang
-  PREFIX	    ${CMAKE_CURRENT_SOURCE_DIR}
-  TMP_DIR           ${CMAKE_CURRENT_SOURCE_DIR}/temp
-  STAMP_DIR         ${CMAKE_CURRENT_SOURCE_DIR}/stamp
-  BINARY_DIR        ${CMAKE_CURRENT_SOURCE_DIR}/build
-  SOURCE_DIR	    ${CMAKE_CURRENT_SOURCE_DIR}/pluto_src/
- CONFIGURE_COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/pluto_src/local_install.sh"
- BUILD_COMMAND make -j 8 -C ${CMAKE_CURRENT_SOURCE_DIR}/pluto_src/
- INSTALL_COMMAND make install -C ${CMAKE_CURRENT_SOURCE_DIR}/pluto_src/
-)
+#ExternalProject_Add( pluto_clang
+#  PREFIX	    ${CMAKE_CURRENT_SOURCE_DIR}
+#  TMP_DIR           ${CMAKE_CURRENT_SOURCE_DIR}/temp
+#  STAMP_DIR         ${CMAKE_CURRENT_SOURCE_DIR}/stamp
+#  BINARY_DIR        ${CMAKE_CURRENT_SOURCE_DIR}/build
+#  SOURCE_DIR	    ${CMAKE_CURRENT_SOURCE_DIR}/pluto_src/
+# CONFIGURE_COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/pluto_src/local_install.sh"
+# BUILD_COMMAND make -j 8 -C ${CMAKE_CURRENT_SOURCE_DIR}/pluto_src/
+# INSTALL_COMMAND make install -C ${CMAKE_CURRENT_SOURCE_DIR}/pluto_src/
+#)
 
-ExternalProject_Get_Property( pluto_clang install_dir)
+#ExternalProject_Get_Property( pluto_clang install_dir)
 
 
 add_llvm_loadable_module(ClanPlugin ClanPlugin.cpp)
@@ -55,7 +55,7 @@ if(LLVM_ENABLE_PLUGINS AND (WIN32 OR CYGWIN))
     )
 endif()
 
-add_dependencies(ClanPlugin pluto_clang)
+#add_dependencies(ClanPlugin pluto_clang)
 add_library( pluto SHARED IMPORTED)
 set_property(TARGET pluto PROPERTY IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/pluto_src/install/lib/libpluto.so)
 
