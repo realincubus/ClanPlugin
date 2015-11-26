@@ -15,13 +15,14 @@ endif()
 add_library( cloog-isl SHARED IMPORTED)
 set_property(TARGET cloog-isl PROPERTY IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/pluto_src/cloog-isl/.libs/libcloog-isl.so)
 
+add_subdirectory( clan )
 
 include_directories( pluto_src/cloog-isl/include )
 include_directories( pluto_src/candl/include )
 include_directories( pluto_src/piplib/include )
+include_directories( pluto_src/clan/include )
 include_directories( pluto_src/include )
 
-add_subdirectory( clan )
 add_subdirectory( pluto_codegen_clang )
 
 include_directories( pluto_codegen_clang )
