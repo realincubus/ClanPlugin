@@ -446,6 +446,56 @@ public:
 
 	  //std::cout << "try to explain why something is not parallel" << std::endl;
 	  //explain_program( prog );
+	  
+	  std::map<int, osl_statement_p > pluto_to_osl;
+	  int ctr = 0;
+	  // map pluto_to_osl
+	  auto scop_stmt = scop->statement;
+	  while( scop_stmt ) {
+	    std::cout << "scop_stmt " << scop_stmt << " -> " << ctr << std::endl;
+	    pluto_to_osl[ctr] = scop_stmt;
+	    scop_stmt = scop_stmt->next;
+	    ctr++;
+	  }
+	  
+
+	  // TODO get more detailed diagnostic
+	  std::cout << "--------------------" << std::endl;
+	  for( auto i = 0 ; i < prog->ndeps; i++ ){
+	    auto* dep = prog->deps[i];
+	    if ( !prog->deps_explanation ) continue;
+	    if ( !prog->deps_explanation[i] ) continue;
+	    std::cout << "dep " << i << " " << prog->deps_explanation[i] << std::endl;
+	    if ( std::string(prog->deps_explanation[i]) != "ok" ) {
+	      // now that we have this information map it back to clangs ast nodes
+	      if ( auto osl_statement = pluto_to_osl[dep->src] ) {
+		std::cout << "got the osl_statment" << std::endl;
+		if ( auto clang_stmt = osl_to_clang[osl_statement] ){
+		  std::cout << "got the clang stmt" << std::endl;
+
+		  DiagnosticsEngine &D = Instance.getDiagnostics();
+		      unsigned DiagID = D.getCustomDiagID(DiagnosticsEngine::Warning, "Dependency" );
+		      D.Report(clang_stmt->getLocStart(), DiagID) << prog->deps_explanation[i];
+		}
+	      }
+	    }
+	    if ( dep->src != dep->dest ) {
+	      if ( std::string(prog->deps_explanation[i]) != "ok" ) {
+		if ( auto osl_statement = pluto_to_osl[dep->dest] ) {
+		  std::cout << "got the osl_statment" << std::endl;
+		  if ( auto clang_stmt = osl_to_clang[osl_statement] ){
+		    std::cout << "got the clang stmt" << std::endl;
+
+		    DiagnosticsEngine &D = Instance.getDiagnostics();
+			unsigned DiagID = D.getCustomDiagID(DiagnosticsEngine::Warning, "Dependency" );
+			D.Report(clang_stmt->getLocStart(), DiagID) << prog->deps_explanation[i];
+		  }
+		}
+	      }
+	    }
+	  }
+	  std::cout << "-------------------" << std::endl;
+
 
 	  std::cout << "done generating cloog code" << std::endl;
 	  pluto_prog_free(prog);
