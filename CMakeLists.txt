@@ -15,7 +15,16 @@ endif()
 add_library( cloog-isl SHARED IMPORTED)
 set_property(TARGET cloog-isl PROPERTY IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/pluto_src/cloog-isl/.libs/libcloog-isl.so)
 
-add_subdirectory( clan )
+#add_library( pet SHARED IMPORTED)
+#set_property(TARGET pet PROPERTY IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/pet/.libs/libpet.so )
+
+add_library( pet STATIC IMPORTED)
+set_property(TARGET pet PROPERTY IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/pet/.libs/libpet.a )
+
+include_directories( pet )
+include_directories( pet/include )
+
+#add_subdirectory( clan )
 
 include_directories( pluto_src/cloog-isl/include )
 include_directories( pluto_src/candl/include )
@@ -28,24 +37,8 @@ add_subdirectory( pluto_codegen_clang )
 include_directories( pluto_codegen_clang )
 include_directories( pluto_src/src )
 
-#include(ExternalProject)
-
-#ExternalProject_Add( pluto_clang
-#  PREFIX	    ${CMAKE_CURRENT_SOURCE_DIR}
-#  TMP_DIR           ${CMAKE_CURRENT_SOURCE_DIR}/temp
-#  STAMP_DIR         ${CMAKE_CURRENT_SOURCE_DIR}/stamp
-#  BINARY_DIR        ${CMAKE_CURRENT_SOURCE_DIR}/build
-#  SOURCE_DIR	    ${CMAKE_CURRENT_SOURCE_DIR}/pluto_src/
-# CONFIGURE_COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/pluto_src/local_install.sh"
-# BUILD_COMMAND make -j 8 -C ${CMAKE_CURRENT_SOURCE_DIR}/pluto_src/
-# INSTALL_COMMAND make install -C ${CMAKE_CURRENT_SOURCE_DIR}/pluto_src/
-#)
-
-#ExternalProject_Get_Property( pluto_clang install_dir)
-
-
 add_llvm_loadable_module(ClanPlugin ClanPlugin.cpp)
-target_link_libraries( ClanPlugin clangASTMatchers clan-clang_static plutocore libclang pluto_codegen_clang )
+target_link_libraries( ClanPlugin clangASTMatchers plutocore libclang pluto_codegen_clang pet )
 
 if(LLVM_ENABLE_PLUGINS AND (WIN32 OR CYGWIN))
   target_link_libraries(ClangPlugin ${cmake_2_8_12_PRIVATE}

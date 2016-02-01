@@ -15,15 +15,13 @@
 #include "clang/Frontend/FrontendPluginRegistry.h"
 #include "clang/AST/AST.h"
 #include "clang/AST/ASTConsumer.h"
+#include "clang/AST/ASTContext.h"
 #include "clang/AST/RecursiveASTVisitor.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Sema/Sema.h"
 #include "llvm/Support/raw_ostream.h"
 #include <fstream>
 #include <chrono>
-//#include <clan/clan.h>
-//#include <osl/scop.h>
-//#include <osl/extensions/irregular.h>
 #include "clang/ASTMatchers/ASTMatchFinder.h"
 #include <iostream>
 #include <sstream>
@@ -37,6 +35,8 @@
 #include <setjmp.h>
 #include <map>
 #include <clang/AST/AST.h>
+#include "pet.h"
+#include "pet_cxx.h"
 
 extern "C"{
 // TODO PlutoProg is not known outside of libpluto
@@ -48,44 +48,39 @@ PlutoProg *scop_to_pluto_prog(osl_scop_p scop, PlutoOptions *options);
 void pluto_prog_free(PlutoProg* prog);
 int pluto_stmt_is_member_of(int stmt_id, Stmt **slist, int len);
 void pluto_detect_transformation_properties(PlutoProg *prog);
-//Ploop **pluto_get_all_loops(const PlutoProg *prog, int *num);
 }
 
 
 
 using namespace clang;
-using namespace clang::ast_matchers;
-
-// TODO make header
-osl_scop_p handleForLoop( const ForStmt* for_stmt, const SourceManager& SM, std::string filename, std::vector<std::pair<SourceRange,std::string>>& messages, std::vector<std::string>& statement_texts, std::map<osl_statement_p,const clang::Stmt*>& osl_to_clang );
-
-
-const char* SCOP_ID = "scop";
-const char* FOR_LOOP_ID = "for_loop";
-const char* LOOP_ITERATOR_ID = "loop_iterator";
-const char* LOOP_INITIALIZER_ID = "loop_initializer";
-const char* LOOP_CONDITION_LIST_ID = "loop_condition_list";
-
-const char* DECREMENT_ONE_ID = "decrement_one";
-const char* INCREMENT_ONE_ID = "increment_one";
-
-const char* CEILD_ID = "ceild";
-const char* FLOORD_ID = "floord";
-
-std::ofstream out;
-
-
-jmp_buf env;
-int restore_point = 0;
-int restore_error = false;
-void signalHandler(int signum) {
-  std::cout << "Signal " << signum << " received" << std::endl;
-  restore_error = true;
-  longjmp(env, 1);
-}
 
 namespace {
 
+
+class ForLoopConsumer : public ASTConsumer {
+public:
+  CompilerInstance &Instance;
+  std::set<std::string> ParsedTemplates;
+  pet_scop* scop = nullptr;
+
+  ForLoopConsumer(CompilerInstance &Instance,
+                         std::set<std::string> ParsedTemplates)
+      : Instance(Instance), ParsedTemplates(ParsedTemplates) { llvm::errs() << "consumer created\n" ;}
+
+  virtual bool HandleTopLevelDecl(DeclGroupRef dg) {
+     isl_ctx* ctx; // TODO initialize
+     Preprocessor &PP = Instance.getPreprocessor();
+     ASTContext &clang_ctx = Instance.getASTContext();
+     DiagnosticsEngine &diags = Instance.getDiagnostics();
+     pet_options* options = nullptr;
+      
+     pet_scop_extract_from_clang_ast(ctx,PP,clang_ctx,diags,options,scop,dg); 
+     return true;
+  }
+
+};
+
+#if 0
 class ForLoopConsumer : public ASTConsumer {
   CompilerInstance &Instance;
   std::set<std::string> ParsedTemplates;
@@ -394,6 +389,11 @@ public:
       std::vector<std::string> statement_texts;
       const SourceManager& SM = context.getSourceManager();
       std::vector<std::pair<SourceRange, std::string>> messages;
+
+      // TODO implement PET as a scop scanner
+
+      // 
+
       std::map<osl_statement_p,const clang::Stmt*> osl_to_clang;
       auto scop = handleForLoop( target_for_loop, SM, "outfile.test.scop.change.this.", messages, statement_texts, osl_to_clang ); 
       // emit all the messages we got from the analysis
@@ -518,12 +518,15 @@ public:
   }
 };
 
+#endif
+
 class ClanAction : public PluginASTAction {
   std::set<std::string> ParsedTemplates;
 protected:
   // #stefan this creates the consumer that is given the TU after everything is done
   std::unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance &CI,
                                                  llvm::StringRef) override {
+    std::ofstream out;
     out.open("/home/incubus/log/handle_translation_unit.log");
     out << __PRETTY_FUNCTION__ << std::endl;
     return llvm::make_unique<ForLoopConsumer>(CI, ParsedTemplates);
