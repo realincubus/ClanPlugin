@@ -18,8 +18,8 @@ set_property(TARGET cloog-isl PROPERTY IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_
 #add_library( pet SHARED IMPORTED)
 #set_property(TARGET pet PROPERTY IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/pet/.libs/libpet.so )
 
-add_library( pet STATIC IMPORTED)
-set_property(TARGET pet PROPERTY IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/pet/.libs/libpet.a )
+add_library( pet SHARED IMPORTED)
+set_property(TARGET pet PROPERTY IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/pet/.libs/libpet.so )
 
 include_directories( pet )
 include_directories( pet/include )
