@@ -1,4 +1,4 @@
-//===- Clan.cpp ---------------------------------------------===//
+//===-  islClan.cpp ---------------------------------------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -38,16 +38,27 @@
 #include "pet.h"
 #include "pet_cxx.h"
 
+#include <isl/options.h>
+#include <isl/arg.h>
+#include <isl/flow.h>
+#include <isl/map.h>
+
 extern "C"{
 // TODO PlutoProg is not known outside of libpluto
 //      since i want to write my own unparser thats not a big problem but its definitly something i 
 //      want to change temporarily
 //      
-//int pluto_multicore_codegen(FILE *cloogfp, FILE *outfp, const PlutoProg *prog);
+int pluto_multicore_codegen(FILE *cloogfp, FILE *outfp, const PlutoProg *prog);
 PlutoProg *scop_to_pluto_prog(osl_scop_p scop, PlutoOptions *options);
 void pluto_prog_free(PlutoProg* prog);
 int pluto_stmt_is_member_of(int stmt_id, Stmt **slist, int len);
 void pluto_detect_transformation_properties(PlutoProg *prog);
+int pluto_schedule_pluto( PlutoProg* prog, PlutoOptions* options );
+
+int pet_tree_foreach_sub_tree(__isl_keep pet_tree *tree,
+    int (*fn)(__isl_keep pet_tree *tree, void *user), void *user);
+
+
 }
 
 
@@ -56,25 +67,334 @@ using namespace clang;
 
 namespace {
 
+// TODO remove from global scope
+std::ofstream out;
+
+extern "C"{
+  PlutoProg* pluto_compute_deps( isl_union_map* schedule, 
+      isl_union_map* read, 
+      isl_union_map* write, 
+      isl_union_map* empty, 
+      isl_union_set* domains,
+      PlutoOptions* options 
+  );
+}
+
+PlutoProg* compute_deps( pet_scop* pscop, PlutoOptions* options ) {
+
+  isl_union_map* schedule= isl_schedule_get_map(pscop->schedule);
+  isl_union_map* read = pet_scop_collect_may_reads(pscop);
+  isl_union_map* write = pet_scop_collect_must_writes(pscop);
+  isl_union_map* empty = isl_union_map_empty(isl_set_get_space(pscop->context));
+  isl_union_set* domains = pet_scop_collect_domains( pscop );
+
+  return pluto_compute_deps( schedule, read, write, empty, domains, options );
+}
+
+
+PlutoProg* pet_to_pluto_prog(pet_scop* scop, PlutoOptions* pluto_options){
+  PlutoProg* prog =  compute_deps( scop, pluto_options ) ;
+}
+
+
+class DeclRefVisitor
+  : public clang::RecursiveASTVisitor<DeclRefVisitor> {
+public:
+
+  DeclRefVisitor( std::vector<NamedDecl*>& _iterators, SourceLocation _begin, SourceLocation _end, SourceManager& _SM ):
+    iterators(_iterators),
+    begin(_begin),
+    end(_end),
+    SM(_SM)
+  {
+
+  }
+
+  bool VisitDeclRefExpr( const DeclRefExpr* declRefExpr ) {
+
+    auto decl_ref_loc_start = declRefExpr->getLocStart();
+    if ( SM.isBeforeInTranslationUnit( decl_ref_loc_start , begin ) ) return true;
+    if ( SM.isBeforeInTranslationUnit( end , decl_ref_loc_start ) ) return true;
+
+    std::cout << "visited a node" << std::endl;
+    for( auto i = 0 ; i < iterators.size() ; i++ ){
+      auto& iterator = iterators[i];
+      if ( declRefExpr->getDecl() == iterator ) {
+	std::cout << "found a reference" << std::endl;
+	// push_this occurence to the list of excludes for this iterator
+	exclude_ranges.push_back( make_pair( declRefExpr->getSourceRange(), std::to_string(i)) );
+	return true;
+      }
+    }
+    
+    // everything that is not an iterator passes this point
+    return true;
+  }
+  std::vector<std::pair<SourceRange,std::string>> exclude_ranges;
+private:
+  std::vector<NamedDecl*>& iterators;
+  SourceLocation begin;
+  SourceLocation end;
+  SourceManager& SM;
+};
 
 class ForLoopConsumer : public ASTConsumer {
 public:
   CompilerInstance &Instance;
   std::set<std::string> ParsedTemplates;
-  pet_scop* scop = nullptr;
+  isl_ctx* ctx = nullptr;
+  DiagnosticsEngine& diags;
+  pet_options* pet_opts = nullptr;
+  Preprocessor& PP;
 
   ForLoopConsumer(CompilerInstance &Instance,
                          std::set<std::string> ParsedTemplates)
-      : Instance(Instance), ParsedTemplates(ParsedTemplates) { llvm::errs() << "consumer created\n" ;}
+      : 
+	Instance(Instance), 
+	ParsedTemplates(ParsedTemplates),
+	diags(Instance.getDiagnostics()),
+	PP( Instance.getPreprocessor() )
+      { 
+      }
+
+  void init(){
+    ASTContext &clang_ctx = Instance.getASTContext();
+    // compiler has no sema right now but it will have in HandleTopLevelDecl
+    init_pet_for_clang_ast( ctx,PP,clang_ctx,diags, pet_opts );	
+  }
 
   virtual bool HandleTopLevelDecl(DeclGroupRef dg) {
-     isl_ctx* ctx; // TODO initialize
-     Preprocessor &PP = Instance.getPreprocessor();
-     ASTContext &clang_ctx = Instance.getASTContext();
-     DiagnosticsEngine &diags = Instance.getDiagnostics();
-     pet_options* options = nullptr;
+
+     init();
+
+     static int ctr = 0;
+     out << "handling top level decl take " << ctr++ << std::endl;
+
+     Sema& sema = Instance.getSema();
+     SourceManager& SM = Instance.getASTContext().getSourceManager();
+     unsigned diag_id_found = diags.getCustomDiagID(DiagnosticsEngine::Warning, "scop if found" );
+     unsigned diag_id_outside = diags.getCustomDiagID(DiagnosticsEngine::Warning, "scop outside" );
+     out << "diagID if found " << diag_id_found << std::endl;
+     out << "diagID outside " << diag_id_outside << std::endl;
+     Decl& decl = **dg.begin();
+     auto decl_loc = decl.getLocStart();
+     FileID dg_fid = SM.getFileID( (*dg.begin())->getLocStart() );
+     SourceLocation sloc_file = SM.translateLineCol(dg_fid,1,1);
       
-     pet_scop_extract_from_clang_ast(ctx,PP,clang_ctx,diags,options,scop,dg); 
+     pet_scop* scop = nullptr;
+     out << "pet_scop " << scop << std::endl;
+     out << "calling pet_scop_extract_from_clang_ast" << std::endl;
+     pet_scop_extract_from_clang_ast(PP,&sema,dg,&scop); 
+     out << "pet_scop " << scop << std::endl;
+  
+ 
+     if ( scop ) {
+      out << "this decl group contains a scop at:" << std::endl;
+      pet_loc* loc = scop->loc;
+      out << pet_loc_get_start(loc) << " to " << pet_loc_get_end( loc ) << std::endl;
+      out << "at line " << pet_loc_get_line(loc) << std::endl;
+
+      auto begin_scop = sloc_file.getLocWithOffset( pet_loc_get_start(loc) );
+      auto end_scop = sloc_file.getLocWithOffset( pet_loc_get_end(loc) );
+
+      // find prallelizm
+      PlutoOptions* pluto_options = pluto_options_alloc(); // memory leak if something goes wrong
+      pluto_options->parallel = true;
+      pluto_options->debug = true;
+      pluto_options->isldep = true;
+      // TODO this is a catastrophe !!!!! remove it
+      options = pluto_options;
+
+      std::cout << "generating pluto program from pet" << std::endl;
+      auto prog = pet_to_pluto_prog(scop, pluto_options);
+      std::cout << "done generating pluto program from scop" << std::endl;
+
+      std::cout << "schedule pluto prog" << std::endl;
+      pluto_schedule_pluto( prog, options );
+      std::cout << "schedule_pluto done " << std::endl;
+      std::cout << "ClanPlugin " << prog->ndeps << std::endl;
+
+      pet_scop_dump( scop );
+
+      std::vector<std::string> statement_texts;
+      // loop over all statements 
+      for (int i = 0; i < scop->n_stmt; ++i){
+          pet_stmt* stmt = scop->stmts[i];
+
+	  pet_loc* loc = stmt->loc;
+	  std::cout << "statement at " << pet_loc_get_start(loc) << " to " << pet_loc_get_end( loc ) << std::endl;
+	  // translate this to a source locations 
+	  auto begin_stmt = sloc_file.getLocWithOffset( pet_loc_get_start(loc) );
+	  auto end_stmt = sloc_file.getLocWithOffset( pet_loc_get_end(loc) );
+	  std::cout << "begin loc " << begin_stmt.printToString(SM) << std::endl;
+	  std::cout << "end loc " << end_stmt.printToString(SM) << std::endl;
+
+	  // get the iteration domain
+	  isl_set* domain = stmt->domain;
+	  isl_set_dump( domain );
+
+	  // get the iteration space of this statement
+	  isl_space* space = pet_stmt_get_space( stmt );
+	  int in_param = isl_space_dim(space, isl_dim_in);
+	  int out_param = isl_space_dim(space, isl_dim_out);
+
+	  std::cout << "in_nparam " << in_param << std::endl;
+
+	  std::vector<NamedDecl*> parameters;
+
+	  // TODO loop over all paramters 
+	  if ( in_param > 0 ) {
+
+	    auto type = isl_dim_in;
+	    const char* name = isl_space_get_dim_name( space, type, 0 );
+	    std::cout << "dim in param " << name << std::endl;
+	    
+	  }
+
+	  if ( out_param > 0 ) {
+	    auto type = isl_dim_out;
+	    const char* name = isl_space_get_dim_name( space, type, 0 );
+	    isl_id* id = isl_space_get_dim_id( space, type, 0 );
+	    std::cout << "dim out param " << name << std::endl;
+	    if ( id ) {
+	      std::cout << "id " << id << std::endl;
+	      void* user_data = isl_id_get_user( id );
+	      if ( user_data ) {
+		std::cout << "user_data " << user_data << std::endl;
+		NamedDecl* named_decl = (NamedDecl*) user_data ;
+		parameters.push_back( named_decl );
+	      }
+	    }else{
+	      std::cout << "no id" << std::endl;
+	    }
+	  }
+
+	  // get the string describing this statement 
+	  auto getString = [](SourceLocation starts_with, SourceLocation ends_with, SourceManager& SM){ 
+	    std::string ret = Lexer::getSourceText(
+	      CharSourceRange::getTokenRange(
+		SourceRange(
+		  //Lexer::getLocForEndOfToken(starts_with,0,SM,LangOptions()), 
+		  starts_with,
+		  ends_with
+		)
+	      ), 
+	      SM,
+	      LangOptions()
+	    );
+	    return ret;
+	  };
+	  auto stmt_text = getString( begin_stmt, end_stmt, SM );
+
+	  std::cout << "stmt_text " << stmt_text << std::endl;
+	      
+	  // TODO replace the iterator name in this string with a placeholder
+
+	  // TODO get the clang stmt that corresponds to this pet_stmt
+	  
+	  // option 1 search it by scanning this decl group for the source location // might be very slow
+	  
+	  DeclRefVisitor visitor(parameters, begin_stmt, end_stmt, SM);
+	  for( auto& declare : dg ){
+	    visitor.TraverseDecl( declare );
+	  }
+
+	  std::string lexer_result = "";
+	  std::string comment = "";
+	  int skip_end = 0; 
+	  // TODO export to function
+	  {
+	    auto starts_with = begin_stmt;
+	    auto expr_end = end_stmt;
+
+	    for ( auto& exclude : visitor.exclude_ranges){
+
+	      std::string ret = Lexer::getSourceText(
+		CharSourceRange::getCharRange(
+		  SourceRange(
+		    Lexer::getLocForEndOfToken(starts_with,0,SM,LangOptions()), 
+		    exclude.first.getBegin()
+		  )
+		), 
+		SM,
+		LangOptions()
+	      );
+
+	      std::cout << "parsed: " << ret << std::endl;
+
+	      lexer_result += ret;
+	      lexer_result += std::string("...") + exclude.second + std::string("...");
+	      
+	      starts_with = exclude.first.getEnd();
+	    }
+
+	    std::string ret = Lexer::getSourceText(
+	      CharSourceRange::getTokenRange(
+		SourceRange(
+		  Lexer::getLocForEndOfToken(starts_with,0,SM,LangOptions()), 
+		  expr_end
+		)
+	      ), 
+	      SM,
+	      LangOptions()
+	    );
+
+	    std::cout << "parsed: " << ret << std::endl;
+
+	    lexer_result += ret;
+	    // to skip the closing bracket if its present
+	    if ( skip_end ) {
+	      lexer_result = lexer_result.substr( 0, lexer_result.size()-1);
+	    }
+	    lexer_result += comment; // the comment include the ";"
+
+	    std::cout << "lexer_result: " << lexer_result << std::endl;
+	  }
+
+	  
+	  // option 2 store the pointer to the ast node into the pet_stmt structure // requires changes to pet
+	  
+	  // option 3 change clangs variable names ( in the AST ) to make it very easy to find the variable names
+	  // Problem: this does not change them in the underlying file
+	  
+	  // option 4 it is already stored in the pet_stmt as a refrence to its arguments;
+	  // pet does not store anything usefull the onlything that is stored is the NamedDecl that is references by 
+	  // the iterator since i need the stmt or the DeclRefExpr itself this is kinda useless
+	  statement_texts.push_back( lexer_result );
+
+      } // loop over all statements
+
+
+
+      // cloog has to generate some file that can then be read by clast
+      size_t in_memory_file_size = 2*1024*1024;
+      char in_memory_file[in_memory_file_size]; // 2MB should be ok for this crutch if this becomes a problem rewrite the code to use streams
+      FILE* cloogfp = fmemopen( in_memory_file, in_memory_file_size, "w" ); 
+      pluto_gen_cloog_file(cloogfp, prog);
+      fclose( cloogfp );
+      cloogfp = fmemopen( in_memory_file, in_memory_file_size, "r" );
+
+      std::stringstream outfp;
+      pluto_codegen_clang::pluto_multicore_codegen( outfp, prog, cloogfp, statement_texts);
+
+      std::cout << outfp.str() << std::endl;
+
+      std::string repl = outfp.str();
+
+      std::cout << "emitting diagnositc" << std::endl;
+      DiagnosticsEngine &D = Instance.getDiagnostics();
+      unsigned DiagID = D.getCustomDiagID(DiagnosticsEngine::Warning, "found a scop");
+      D.Report(begin_scop, DiagID) 
+      << FixItHint::CreateReplacement(SourceRange(begin_scop,end_scop), repl.c_str() );
+
+
+    } // if scop 
+    else{
+      out << "no scop in this decl group" << std::endl;
+    }
+
+     // TODO this has to be called no matter what needs a guard
+     finalize_pet_for_clang_ast();
      return true;
   }
 
@@ -526,15 +846,25 @@ protected:
   // #stefan this creates the consumer that is given the TU after everything is done
   std::unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance &CI,
                                                  llvm::StringRef) override {
-    std::ofstream out;
+    std::freopen("/home/incubus/log/clan_redir_stdout.log", "w", stdout);
+    std::freopen("/home/incubus/log/clan_redir_stderr.log", "w", stderr);
+    setvbuf ( stdout , NULL , _IOLBF , 1024 );
+    setvbuf ( stderr , NULL , _IOLBF , 1024 );
     out.open("/home/incubus/log/handle_translation_unit.log");
     out << __PRETTY_FUNCTION__ << std::endl;
-    return llvm::make_unique<ForLoopConsumer>(CI, ParsedTemplates);
+    auto ret =  llvm::make_unique<ForLoopConsumer>(CI, ParsedTemplates);
+    ret->ctx = isl_ctx_alloc();
+    out << "setting autodetect " << std::endl;
+    ret->pet_opts = new pet_options;
+    ret->pet_opts->autodetect = true;
+    out << "done setting autodetect " << std::endl;
+    return std::move(ret);
   }
 
   // #stefan: here one can parse some arugments for this plugin
   bool ParseArgs(const CompilerInstance &CI,
                  const std::vector<std::string> &args) override {
+#if 0
     for (unsigned i = 0, e = args.size(); i != e; ++i) {
       llvm::errs() << "Clan arg = " << args[i] << "\n";
 
@@ -557,7 +887,7 @@ protected:
     }
     if (!args.empty() && args[0] == "help")
       PrintHelp(llvm::errs());
-
+#endif
     return true;
   }
   void PrintHelp(llvm::raw_ostream& ros) {
