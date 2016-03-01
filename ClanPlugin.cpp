@@ -182,7 +182,91 @@ std::vector<NamedDecl*> get_parameters_for_pet_stmt( pet_stmt* stmt ) {
     return parameters;
 }
 
+// pet already pareses the comment till the end of the line 
+// but it does not add the \n 
+// if the statement is not followed by a comment the new line character is already in it
+std::string getSourceText( SourceLocation starts_with, 
+    std::vector<std::pair<SourceRange,std::string>>& exclude_ranges, 
+    SourceLocation ends_with, SourceManager& SM )  {
 
+  std::string lexer_result = "";
+  std::string comment = "";
+  int skip_end = 0; 
+
+  for ( auto& exclude : exclude_ranges){
+
+    std::string ret = Lexer::getSourceText(
+      CharSourceRange::getCharRange(
+	SourceRange(
+	  Lexer::getLocForEndOfToken(starts_with,0,SM,LangOptions()), 
+	  exclude.first.getBegin()
+	)
+      ), 
+      SM,
+      LangOptions()
+    );
+
+    std::cout << "parsed: " << ret << std::endl;
+
+    lexer_result += ret;
+    lexer_result += std::string("...") + exclude.second + std::string("...");
+    
+    starts_with = exclude.first.getEnd();
+  }
+
+  std::string ret = Lexer::getSourceText(
+    CharSourceRange::getTokenRange(
+      SourceRange(
+	Lexer::getLocForEndOfToken(starts_with,0,SM,LangOptions()), 
+	ends_with
+      )
+    ), 
+    SM,
+    LangOptions()
+  );
+
+  std::cout << "parsed: " << ret << std::endl;
+
+  lexer_result += ret;
+  // to skip the closing bracket if its present
+  if ( skip_end ) {
+    lexer_result = lexer_result.substr( 0, lexer_result.size()-1);
+  }
+  lexer_result += comment; // the comment include the ";"
+
+  // add a newline at the end if it does not exist
+  if ( lexer_result.size() > 0 ) {
+    if ( lexer_result.back() != '\n' ){
+      lexer_result.push_back('\n');
+    }
+  }
+
+  std::cout << "lexer_result: " << lexer_result << std::endl;
+
+  return lexer_result;
+
+}
+
+// search it by scanning this decl group for the source location // might be very slow
+void replace_with_placeholder( pet_loc* loc, std::vector<NamedDecl*>& parameters, const ForStmt* for_stmt, 
+    SourceLocation sloc_file, SourceManager& SM,
+    std::vector<std::string>& statement_texts ) {
+
+  // translate this to a source locations 
+  std::cout << "statement at " << pet_loc_get_start(loc) << " to " << pet_loc_get_end( loc ) << std::endl;
+  auto begin_stmt = sloc_file.getLocWithOffset( pet_loc_get_start(loc) );
+  auto end_stmt = sloc_file.getLocWithOffset( pet_loc_get_end(loc) );
+  std::cout << "begin loc " << begin_stmt.printToString(SM) << std::endl;
+  std::cout << "end loc " << end_stmt.printToString(SM) << std::endl;
+  
+  DeclRefVisitor visitor(parameters, begin_stmt, end_stmt, SM);
+  visitor.TraverseStmt( (ForStmt*)for_stmt );
+
+  auto res = getSourceText(begin_stmt, visitor.exclude_ranges, end_stmt, SM );
+  statement_texts.push_back( res );
+}
+
+// returns the statements with some placeholders so that the iterators can be replaced with new iterator names  
 std::vector<std::string> get_statement_texts( pet_scop* scop, SourceLocation sloc_file, SourceManager& SM, const ForStmt* for_stmt ){
 
   std::vector<std::string> statement_texts;
@@ -190,96 +274,13 @@ std::vector<std::string> get_statement_texts( pet_scop* scop, SourceLocation slo
   for (int i = 0; i < scop->n_stmt; ++i){
     pet_stmt* stmt = scop->stmts[i];
 
-    pet_loc* loc = stmt->loc;
-    std::cout << "statement at " << pet_loc_get_start(loc) << " to " << pet_loc_get_end( loc ) << std::endl;
-    // translate this to a source locations 
-    auto begin_stmt = sloc_file.getLocWithOffset( pet_loc_get_start(loc) );
-    auto end_stmt = sloc_file.getLocWithOffset( pet_loc_get_end(loc) );
-    std::cout << "begin loc " << begin_stmt.printToString(SM) << std::endl;
-    std::cout << "end loc " << end_stmt.printToString(SM) << std::endl;
-
     auto parameters = get_parameters_for_pet_stmt( stmt );
-    
-    // get the string describing this statement 
-    auto getString = [](SourceLocation starts_with, SourceLocation ends_with, SourceManager& SM){ 
-      std::string ret = Lexer::getSourceText(
-	CharSourceRange::getTokenRange(
-	  SourceRange(
-	    //Lexer::getLocForEndOfToken(starts_with,0,SM,LangOptions()), 
-	    starts_with,
-	    ends_with
-	  )
-	), 
-	SM,
-	LangOptions()
-      );
-      return ret;
-    };
-    auto stmt_text = getString( begin_stmt, end_stmt, SM );
-
-    std::cout << "stmt_text " << stmt_text << std::endl;
 	
+    pet_loc* loc = stmt->loc;
     // replace the iterator name in this string with a placeholder
+    replace_with_placeholder( loc, parameters, for_stmt, sloc_file, SM, statement_texts );
     
-    // option 1 search it by scanning this decl group for the source location // might be very slow
     
-    DeclRefVisitor visitor(parameters, begin_stmt, end_stmt, SM);
-    visitor.TraverseStmt( (ForStmt*)for_stmt );
-
-    std::string lexer_result = "";
-    std::string comment = "";
-    int skip_end = 0; 
-    // TODO export to function
-    {
-      auto starts_with = begin_stmt;
-      auto expr_end = end_stmt;
-
-      for ( auto& exclude : visitor.exclude_ranges){
-
-	std::string ret = Lexer::getSourceText(
-	  CharSourceRange::getCharRange(
-	    SourceRange(
-	      Lexer::getLocForEndOfToken(starts_with,0,SM,LangOptions()), 
-	      exclude.first.getBegin()
-	    )
-	  ), 
-	  SM,
-	  LangOptions()
-	);
-
-	std::cout << "parsed: " << ret << std::endl;
-
-	lexer_result += ret;
-	lexer_result += std::string("...") + exclude.second + std::string("...");
-	
-	starts_with = exclude.first.getEnd();
-      }
-
-      std::string ret = Lexer::getSourceText(
-	CharSourceRange::getTokenRange(
-	  SourceRange(
-	    Lexer::getLocForEndOfToken(starts_with,0,SM,LangOptions()), 
-	    expr_end
-	  )
-	), 
-	SM,
-	LangOptions()
-      );
-
-      std::cout << "parsed: " << ret << std::endl;
-
-      lexer_result += ret;
-      // to skip the closing bracket if its present
-      if ( skip_end ) {
-	lexer_result = lexer_result.substr( 0, lexer_result.size()-1);
-      }
-      lexer_result += comment; // the comment include the ";"
-
-      std::cout << "lexer_result: " << lexer_result << std::endl;
-    }
-
-    statement_texts.push_back( lexer_result );
-
   } // loop over all statements
 
   return statement_texts;
@@ -334,7 +335,24 @@ static void create_scop_replacement( ASTContext& ctx_clang, pet_scop* scop, cons
   char in_memory_file[in_memory_file_size]; // 2MB should be ok for this crutch if this becomes a problem rewrite the code to use streams
   FILE* cloogfp = fmemopen( in_memory_file, in_memory_file_size, "w" ); 
   pluto_gen_cloog_file(cloogfp, prog);
+  fprintf(cloogfp, "\n");
   fclose( cloogfp );
+
+  // TODO needed to debug a int double problem
+#if 0
+  // DEBUG: Write it to the screen
+  cloogfp = fmemopen( in_memory_file, in_memory_file_size, "r" );
+  ssize_t read;
+  size_t len;
+  char * line = NULL;
+  while ((read = getline(&line, &len, cloogfp)) != -1) {
+    printf("%s", line);
+  }
+
+  fclose( cloogfp );
+  //
+#endif
+
   cloogfp = fmemopen( in_memory_file, in_memory_file_size, "r" );
 
   std::stringstream outfp;
@@ -398,9 +416,6 @@ class Callback : public MatchFinder::MatchCallback {
 	 if ( auto* for_stmt = Result.Nodes.getNodeAs<ForStmt>("for_stmt") ) {
 	   auto loc = for_stmt->getLocStart();
 	   if ( SM.isInMainFile( loc ) ) {
-	     //unsigned id = diag.getCustomDiagID(DiagnosticsEngine::Warning, "test diagnostic from callback");
-	     //diag.Report(loc, id) << "test diagnostic text ";
-	     //std::cout << "location of for_stmt is in the main file " << SM.getFilename(loc).str() << std::endl;
 	     extract_scop_with_pet( context, for_stmt, function_decl );
 	   }
 	   //else{
@@ -414,51 +429,16 @@ class Callback : public MatchFinder::MatchCallback {
 
 class ForLoopConsumer : public ASTConsumer {
 public:
-#if 0
-  SourceManager* SM = nullptr;
-  ASTContext* clang_ctx = nullptr;
-  DiagnosticsEngine* diags = nullptr;// = Instance.getDiagnostics();
-  CompilerInstance& Instance;
-#endif
 
   ForLoopConsumer(CompilerInstance& _Instance) 
-#if 0
-    :
-      Instance(_Instance)
-#endif
   { 
     std::cout << "for loop consumer created " << this << std::endl;
-    //fill_context_info( Instance );
   }
 
   ~ForLoopConsumer(){
     std::cout << "for loop consumer destroyed " << this << std::endl;
   }
 
-
-#if 0
-  void fill_context_info( CompilerInstance& Instance ){
-    if ( Instance.hasASTContext() && clang_ctx == nullptr ){
-      clang_ctx = &Instance.getASTContext();
-    }
-    if ( Instance.hasDiagnostics() && diags == nullptr ) {
-      diags = &Instance.getDiagnostics();
-    }
-    if ( Instance.hasSourceManager() && SM == nullptr ){
-      SM = &Instance.getSourceManager();
-    }
-  }
-#endif
-
-#if 0
-  void Initialize( ASTContext& ctx ) override {
-
-    clang_ctx = &ctx;
-    SM = &ctx.getSourceManager();
-    diags = &ctx.getDiagnostics();
-
-  }
-#endif
 
   DeclarationMatcher makeForLoopMatcher(){
     return functionDecl(
@@ -477,272 +457,6 @@ public:
     Finder.addMatcher( makeForLoopMatcher(), &Fixer);
     std::cout << "running matcher" << std::endl;
     Finder.matchAST(clang_ctx);
-  }
-#endif
-
-#if 0
-  virtual bool HandleTopLevelDecl(DeclGroupRef dg) {
-
-     std::cout << "HandleTopLevelDecl " << this << std::endl;
-
-     if ( !this ) return false;
-
-     isl_ctx* ctx = isl_ctx_alloc();
-
-     // TODO limit the printout to the file we are looking at 
-     //      we are not interested for optimizations in <vector> or other headers 
-     
-     //fill_context_info(Instance);
-     for( auto&& element : dg ){
-	 auto loc = element->getLocStart();
-	 if ( SM->isInMainFile( loc ) ) {
-	   DiagnosticsEngine &diag = Instance.getDiagnostics();
-	   unsigned id = diag.getCustomDiagID(DiagnosticsEngine::Warning,
-						      "test diagnostic from htld");
-	   std::cout << "location of dg is in the main file " << SM->getFilename(loc).str() << std::endl;
-	   diag.Report(loc, id) << "test diagnostic text ";
-	 }else{
-	   std::cout << "location of dg is not in the main file but in " << SM->getFilename(loc).str() << std::endl;
-	 }
-     }
-
-     
-
-#if 0
-     std::cout << "handling top level decl take " << ctr++ << " in consumer instance " << this << std::endl;
-     //Pet pet_scanner(ctx, Instance.getPreprocessor() ,*diags, clang_ctx,false);
-     std::cout << "done creating the Pet scanner object" << std::endl;
-
-     std::cout << "LINE" << __LINE__ << std::endl;
-
-
-     std::cout << "LINE" << __LINE__ << std::endl;
-     std::cout << "ci " << this << " ast context " << &clang_ctx << " sm " << SM  << std::endl;
-     std::cout << "LINE" << __LINE__ << std::endl;
-
-     unsigned diag_id_found = diags->getCustomDiagID(DiagnosticsEngine::Warning, "scop if found" );
-     std::cout << "LINE" << __LINE__ << std::endl;
-     unsigned diag_id_outside = diags->getCustomDiagID(DiagnosticsEngine::Warning, "scop outside" );
-     std::cout << "diagID if found " << diag_id_found << std::endl;
-     std::cout << "diagID outside " << diag_id_outside << std::endl;
-     FileID dg_fid = SM->getFileID( (*dg.begin())->getLocStart() );
-     SourceLocation sloc_file = SM->translateLineCol(dg_fid,1,1);
-      
-     pet_scop* scop = nullptr;
-#if 0
-     std::cout << "pet_scop " << scop << std::endl;
-     std::cout << "calling pet_scop_extract_from_clang_ast" << std::endl;
-     pet_scanner.pet_scop_extract_from_clang_ast(clang_ctx,nullptr,dg,&scop); 
-     std::cout << "pet_scop " << scop << std::endl;
-#endif
-
-
- 
-     if ( scop ) {
-      std::cout << "this decl group contains a scop at:" << std::endl;
-      pet_loc* loc = scop->loc;
-      std::cout << pet_loc_get_start(loc) << " to " << pet_loc_get_end( loc ) << std::endl;
-      std::cout << "at line " << pet_loc_get_line(loc) << std::endl;
-
-      auto begin_scop = sloc_file.getLocWithOffset( pet_loc_get_start(loc) );
-      auto end_scop = sloc_file.getLocWithOffset( pet_loc_get_end(loc) );
-
-      // find prallelism
-      PlutoOptions* pluto_options = pluto_options_alloc(); // memory leak if something goes wrong
-      pluto_options->parallel = true;
-      pluto_options->debug = true;
-      pluto_options->isldep = true;
-      // TODO this is a catastrophe !!!!! remove it
-      options = pluto_options;
-
-      std::cout << "generating pluto program from pet" << std::endl;
-      auto prog = pet_to_pluto_prog(scop, pluto_options);
-      std::cout << "done generating pluto program from scop" << std::endl;
-
-      std::cout << "schedule pluto prog" << std::endl;
-      pluto_schedule_pluto( prog, options );
-      std::cout << "schedule_pluto done " << std::endl;
-      std::cout << "ClanPlugin " << prog->ndeps << std::endl;
-
-      pet_scop_dump( scop );
-
-      std::vector<std::string> statement_texts;
-      // loop over all statements 
-      for (int i = 0; i < scop->n_stmt; ++i){
-          pet_stmt* stmt = scop->stmts[i];
-
-	  pet_loc* loc = stmt->loc;
-	  std::cout << "statement at " << pet_loc_get_start(loc) << " to " << pet_loc_get_end( loc ) << std::endl;
-	  // translate this to a source locations 
-	  auto begin_stmt = sloc_file.getLocWithOffset( pet_loc_get_start(loc) );
-	  auto end_stmt = sloc_file.getLocWithOffset( pet_loc_get_end(loc) );
-	  std::cout << "begin loc " << begin_stmt.printToString(*SM) << std::endl;
-	  std::cout << "end loc " << end_stmt.printToString(*SM) << std::endl;
-
-	  // get the iteration domain
-	  isl_set* domain = stmt->domain;
-	  isl_set_dump( domain );
-
-	  // get the iteration space of this statement
-	  isl_space* space = pet_stmt_get_space( stmt );
-	  int in_param = isl_space_dim(space, isl_dim_in);
-	  int out_param = isl_space_dim(space, isl_dim_out);
-
-	  std::cout << "in_nparam " << in_param << std::endl;
-
-	  std::vector<NamedDecl*> parameters;
-
-	  // TODO loop over all paramters 
-	  if ( in_param > 0 ) {
-
-	    auto type = isl_dim_in;
-	    const char* name = isl_space_get_dim_name( space, type, 0 );
-	    std::cout << "dim in param " << name << std::endl;
-	    
-	  }
-
-	  if ( out_param > 0 ) {
-	    auto type = isl_dim_out;
-	    const char* name = isl_space_get_dim_name( space, type, 0 );
-	    isl_id* id = isl_space_get_dim_id( space, type, 0 );
-	    std::cout << "dim out param " << name << std::endl;
-	    if ( id ) {
-	      std::cout << "id " << id << std::endl;
-	      void* user_data = isl_id_get_user( id );
-	      if ( user_data ) {
-		std::cout << "user_data " << user_data << std::endl;
-		NamedDecl* named_decl = (NamedDecl*) user_data ;
-		parameters.push_back( named_decl );
-	      }
-	    }else{
-	      std::cout << "no id" << std::endl;
-	    }
-	  }
-
-	  // get the string describing this statement 
-	  auto getString = [](SourceLocation starts_with, SourceLocation ends_with, SourceManager& SM){ 
-	    std::string ret = Lexer::getSourceText(
-	      CharSourceRange::getTokenRange(
-		SourceRange(
-		  //Lexer::getLocForEndOfToken(starts_with,0,SM,LangOptions()), 
-		  starts_with,
-		  ends_with
-		)
-	      ), 
-	      SM,
-	      LangOptions()
-	    );
-	    return ret;
-	  };
-	  auto stmt_text = getString( begin_stmt, end_stmt, *SM );
-
-	  std::cout << "stmt_text " << stmt_text << std::endl;
-	      
-	  // replace the iterator name in this string with a placeholder
-	  
-	  // option 1 search it by scanning this decl group for the source location // might be very slow
-	  
-	  DeclRefVisitor visitor(parameters, begin_stmt, end_stmt, *SM);
-	  for( auto& declare : dg ){
-	    visitor.TraverseDecl( declare );
-	  }
-
-	  std::string lexer_result = "";
-	  std::string comment = "";
-	  int skip_end = 0; 
-	  // TODO export to function
-	  {
-	    auto starts_with = begin_stmt;
-	    auto expr_end = end_stmt;
-
-	    for ( auto& exclude : visitor.exclude_ranges){
-
-	      std::string ret = Lexer::getSourceText(
-		CharSourceRange::getCharRange(
-		  SourceRange(
-		    Lexer::getLocForEndOfToken(starts_with,0,*SM,LangOptions()), 
-		    exclude.first.getBegin()
-		  )
-		), 
-		*SM,
-		LangOptions()
-	      );
-
-	      std::cout << "parsed: " << ret << std::endl;
-
-	      lexer_result += ret;
-	      lexer_result += std::string("...") + exclude.second + std::string("...");
-	      
-	      starts_with = exclude.first.getEnd();
-	    }
-
-	    std::string ret = Lexer::getSourceText(
-	      CharSourceRange::getTokenRange(
-		SourceRange(
-		  Lexer::getLocForEndOfToken(starts_with,0,*SM,LangOptions()), 
-		  expr_end
-		)
-	      ), 
-	      *SM,
-	      LangOptions()
-	    );
-
-	    std::cout << "parsed: " << ret << std::endl;
-
-	    lexer_result += ret;
-	    // to skip the closing bracket if its present
-	    if ( skip_end ) {
-	      lexer_result = lexer_result.substr( 0, lexer_result.size()-1);
-	    }
-	    lexer_result += comment; // the comment include the ";"
-
-	    std::cout << "lexer_result: " << lexer_result << std::endl;
-	  }
-
-	  
-	  // option 2 store the pointer to the ast node into the pet_stmt structure // requires changes to pet
-	  
-	  // option 3 change clangs variable names ( in the AST ) to make it very easy to find the variable names
-	  // Problem: this does not change them in the underlying file
-	  
-	  // option 4 it is already stored in the pet_stmt as a refrence to its arguments;
-	  // pet does not store anything usefull the onlything that is stored is the NamedDecl that is references by 
-	  // the iterator since i need the stmt or the DeclRefExpr itself this is kinda useless
-	  statement_texts.push_back( lexer_result );
-
-      } // loop over all statements
-
-
-
-      // cloog has to generate some file that can then be read by clast
-      size_t in_memory_file_size = 2*1024*1024;
-      char in_memory_file[in_memory_file_size]; // 2MB should be ok for this crutch if this becomes a problem rewrite the code to use streams
-      FILE* cloogfp = fmemopen( in_memory_file, in_memory_file_size, "w" ); 
-      pluto_gen_cloog_file(cloogfp, prog);
-      fclose( cloogfp );
-      cloogfp = fmemopen( in_memory_file, in_memory_file_size, "r" );
-
-      std::stringstream outfp;
-      pluto_codegen_clang::pluto_multicore_codegen( outfp, prog, cloogfp, statement_texts);
-
-      std::cout << outfp.str() << std::endl;
-
-      std::string repl = outfp.str();
-
-      std::cerr << "emitting diagnositc" << std::endl;
-      unsigned DiagID = diags->getCustomDiagID(DiagnosticsEngine::Warning, "found a scop");
-      std::cerr << "got id " << DiagID << std::endl;
-      diags->Report(begin_scop, DiagID) 
-	<< FixItHint::CreateReplacement(SourceRange(begin_scop,end_scop), repl.c_str() );
-      std::cerr << "reported error " << DiagID << std::endl;
-
-    } // if scop 
-    else{
-      std::cout << "no scop in this decl group" << std::endl;
-    }
-
-#endif
-     return true;
   }
 #endif
 
@@ -770,6 +484,15 @@ class ClanAction : public PluginASTAction {
 
   //std::set<std::string> ParsedTemplates;
 protected:
+
+  enum EMIT_CODE_TYPE{
+      EMIT_ACC,
+      EMIT_OPENMP,
+      EMIT_HPX,
+      EMIT_LIST_END
+  };
+  EMIT_CODE_TYPE emit_code_type = EMIT_ACC;
+
   // NOTE: stefan this creates the consumer that is given the TU after everything is done
   std::unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance &CI,
                                                  llvm::StringRef) override {
@@ -781,38 +504,38 @@ protected:
     return std::move(ret);
   }
 
-  // #stefan: here one can parse some arugments for this plugin
-  bool ParseArgs(const CompilerInstance &CI,
-                 const std::vector<std::string> &args) override {
-#if 0
-    for (unsigned i = 0, e = args.size(); i != e; ++i) {
-      llvm::errs() << "Clan arg = " << args[i] << "\n";
 
-      // Example error handling.
-      DiagnosticsEngine &D = CI.getDiagnostics();
-      if (args[i] == "-an-error") {
-        unsigned DiagID = D.getCustomDiagID(DiagnosticsEngine::Error,
-                                            "invalid argument '%0'");
-        D.Report(DiagID) << args[i];
-        return false;
-      } else if (args[i] == "-parse-template") {
-        if (i + 1 >= e) {
-          D.Report(D.getCustomDiagID(DiagnosticsEngine::Error,
-                                     "missing -parse-template argument"));
-          return false;
-        }
-        ++i;
-        ParsedTemplates.insert(args[i]);
-      }
-    }
-    if (!args.empty() && args[0] == "help")
-      PrintHelp(llvm::errs());
-#endif
-    return true;
-  }
   void PrintHelp(llvm::raw_ostream& ros) {
     ros << "Help for Clan plugin goes here\n";
   }
+
+  // #stefan: here one can parse some arugments for this plugin
+  bool ParseArgs(const CompilerInstance &CI,
+                 const std::vector<std::string> &args) override {
+
+    for (unsigned i = 0, e = args.size(); i != e; ++i) {
+      llvm::errs() << "Clan arg = " << args[i] << "\n";
+
+      if ( args[i] == "-emit-openacc" ) {
+	std::cout << "emiting openacc" << std::endl;
+	emit_code_type = EMIT_ACC;
+      }
+
+      if ( args[i] == "-emit-openmp" ) {
+	std::cout << "emiting openmp" << std::endl;
+	emit_code_type = EMIT_OPENMP;
+      }
+
+      if ( args[i] == "-emit-hpx" ) {
+	std::cout << "emiting hpx" << std::endl;
+	emit_code_type = EMIT_HPX;
+      }
+
+    }
+
+    return true;
+  }
+
 
 };
 
