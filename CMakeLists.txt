@@ -36,8 +36,11 @@ add_subdirectory( pluto_codegen_clang )
 include_directories( pluto_codegen_clang )
 include_directories( pluto_src/src )
 
+
 add_llvm_loadable_module(ClanPlugin ClanPlugin.cpp)
 target_link_libraries( ClanPlugin clangASTMatchers libclang plutocore pluto_codegen_clang pet isl clangSema )
+
+#set_target_properties( ClanPlugin PROPERTIES COMPILE_FLAGS -fsanitize=address)
 
 if(LLVM_ENABLE_PLUGINS AND (WIN32 OR CYGWIN))
   target_link_libraries(ClangPlugin ${cmake_2_8_12_PRIVATE}
