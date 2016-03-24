@@ -29,7 +29,7 @@
 #include <fstream>
 #include <pluto/libpluto.h>
 #include <string>
-#include <pluto_codegen_clang.hpp>
+#include "pluto_codegen_clang.hpp"
 #include <thread>
 #include <signal.h>
 #include <setjmp.h>
@@ -37,6 +37,7 @@
 #include <clang/AST/AST.h>
 #include "pet.h"
 #include "pet_cxx.h"
+#include "stdlib_matchers.hpp"
 
 #include <isl/options.h>
 #include <isl/arg.h>
@@ -48,15 +49,15 @@ extern "C"{
 //      since i want to write my own unparser thats not a big problem but its definitly something i 
 //      want to change temporarily
 //      
-int pluto_multicore_codegen(FILE *cloogfp, FILE *outfp, const PlutoProg *prog);
-PlutoProg *scop_to_pluto_prog(osl_scop_p scop, PlutoOptions *options);
-void pluto_prog_free(PlutoProg* prog);
-int pluto_stmt_is_member_of(int stmt_id, Stmt **slist, int len);
-void pluto_detect_transformation_properties(PlutoProg *prog);
+//int pluto_multicore_codegen(FILE *cloogfp, FILE *outfp, const PlutoProg *prog);
+//PlutoProg *scop_to_pluto_prog(osl_scop_p scop, PlutoOptions *options);
+//void pluto_prog_free(PlutoProg* prog);
+//int pluto_stmt_is_member_of(int stmt_id, Stmt **slist, int len);
+//void pluto_detect_transformation_properties(PlutoProg *prog);
 int pluto_schedule_pluto( PlutoProg* prog, PlutoOptions* options );
 
-int pet_tree_foreach_sub_tree(__isl_keep pet_tree *tree,
-    int (*fn)(__isl_keep pet_tree *tree, void *user), void *user);
+//int pet_tree_foreach_sub_tree(__isl_keep pet_tree *tree,
+//    int (*fn)(__isl_keep pet_tree *tree, void *user), void *user);
 
 
 }
@@ -288,7 +289,7 @@ std::vector<std::string> get_statement_texts( pet_scop* scop, SourceLocation slo
 }
 
 
-static void create_scop_replacement( ASTContext& ctx_clang, pet_scop* scop, const ForStmt* for_stmt ) {
+static void create_scop_replacement( ASTContext& ctx_clang, pet_scop* scop, const ForStmt* for_stmt, pluto_codegen_clang::EMIT_CODE_TYPE emit_code_type ) {
 
   SourceManager& SM = ctx_clang.getSourceManager();
   DiagnosticsEngine& diag = ctx_clang.getDiagnostics();
@@ -304,25 +305,44 @@ static void create_scop_replacement( ASTContext& ctx_clang, pet_scop* scop, cons
   auto begin_scop = sloc_file.getLocWithOffset( pet_loc_get_start(loc) );
   auto end_scop = sloc_file.getLocWithOffset( pet_loc_get_end(loc) );
 
-  // find prallelism
-  PlutoOptions* pluto_options = pluto_options_alloc(); // memory leak if something goes wrong
-  pluto_options->parallel = true;
-  pluto_options->debug = true;
-  pluto_options->isldep = true;
-  // TODO this is a catastrophe !!!!! remove it
-  options = pluto_options;
+  auto begin_pluto = std::chrono::high_resolution_clock::now();
+    // find prallelism
+    PlutoOptions* pluto_options = pluto_options_alloc(); // memory leak if something goes wrong
+    pluto_options->parallel = true;
+    pluto_options->debug = true;
+    pluto_options->isldep = true;
+    // TODO this is a catastrophe !!!!! remove it
+    options = pluto_options;
 
-  std::cout << "generating pluto program from pet" << std::endl;
-  auto prog = pet_to_pluto_prog(scop, pluto_options);
-  std::cout << "done generating pluto program from scop" << std::endl;
+    std::cout << "generating pluto program from pet" << std::endl;
+    auto prog = pet_to_pluto_prog(scop, pluto_options);
+    std::cout << "done generating pluto program from scop" << std::endl;
 
-  std::cout << "schedule pluto prog" << std::endl;
-  pluto_schedule_pluto( prog, options );
-  std::cout << "schedule_pluto done " << std::endl;
-  std::cout << "ClanPlugin " << prog->ndeps << std::endl;
+    std::cout << "schedule pluto prog" << std::endl;
+    
+    // the pluto_function returns a number that indicated how many loops are parallel 
+    int parallel_loops = pluto_schedule_pluto( prog, options );
+    std::cout << "schedule_pluto done " << std::endl;
+    std::cout << "ClanPlugin " << prog->ndeps << std::endl;
+  auto end_pluto = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double> diff = end_pluto-begin_pluto;
+  std::cout << "pluto time consumption " << diff.count() << " s" << std::endl;
 
-  // TODO determin parallelism
-  // dont continue if not found
+  if ( parallel_loops <= 0 ) {
+    std::cout << "loop is not parallel" << std::endl;
+    // TODO emit diagnostic on why its not parallel
+    // TODO run sequential STL algorithm matcher 
+    auto begin_analyzer = std::chrono::high_resolution_clock::now();
+    {
+      stdlib_matchers::analyze( for_stmt, SM, ctx_clang, false );
+    }
+    auto end_analyzer = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> diff = end_analyzer-begin_analyzer;
+    std::cout << "analyzer time consumption " << diff.count() << " s" << std::endl;
+    return;
+  }
+
+  // at this point we know that the loop is parallel 
 
   pet_scop_dump( scop );
 
@@ -356,7 +376,7 @@ static void create_scop_replacement( ASTContext& ctx_clang, pet_scop* scop, cons
   cloogfp = fmemopen( in_memory_file, in_memory_file_size, "r" );
 
   std::stringstream outfp;
-  pluto_codegen_clang::pluto_multicore_codegen( outfp, prog, cloogfp, statement_texts);
+  pluto_codegen_clang::pluto_multicore_codegen( outfp, prog, cloogfp, statement_texts, emit_code_type );
 
   std::cout << outfp.str() << std::endl;
 
@@ -373,15 +393,13 @@ static void create_scop_replacement( ASTContext& ctx_clang, pet_scop* scop, cons
 }
 
 
-static void extract_scop_with_pet( ASTContext& ctx_clang, const ForStmt* for_stmt, const FunctionDecl* function_decl ) {
+static void extract_scop_with_pet( ASTContext& ctx_clang, const ForStmt* for_stmt, const FunctionDecl* function_decl, pluto_codegen_clang::EMIT_CODE_TYPE emit_code_type ) {
   
-  isl_ctx* ctx_isl = isl_ctx_alloc();
-
   DiagnosticsEngine& diag = ctx_clang.getDiagnostics();
   SourceManager& SM = ctx_clang.getSourceManager();
 
   std::cout << "handling for_stmt " << ctr++ << std::endl;
-  Pet pet_scanner(ctx_isl, diag, &ctx_clang );
+  Pet pet_scanner( diag, &ctx_clang );
   std::cout << "done creating the Pet scanner object" << std::endl;
 
   std::cout << "LINE" << __LINE__ << std::endl;
@@ -391,24 +409,31 @@ static void extract_scop_with_pet( ASTContext& ctx_clang, const ForStmt* for_stm
 
   pet_scop* scop = nullptr;
 
+  auto begin_pet = std::chrono::high_resolution_clock::now();
   std::cout << "calling pet_scop_extract_from_clang_ast" << std::endl;
   pet_scanner.pet_scop_extract_from_clang_ast(&ctx_clang,(ForStmt*)for_stmt, (FunctionDecl*) function_decl ,&scop); 
   std::cout << "done calling pet_scop_extract_from_clang_ast" << std::endl;
+  auto end_pet = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double> diff = end_pet-begin_pet;
+  std::cout << "pet time consumption " << diff.count() << " s" << std::endl;
+
 
   if ( scop ) {
     std::cout << "found a valid scop" << std::endl;
-    create_scop_replacement( ctx_clang, scop, for_stmt );
+    create_scop_replacement( ctx_clang, scop, for_stmt, emit_code_type );
   }
 }
 
 class Callback : public MatchFinder::MatchCallback {
   public:
-    Callback () {
+    Callback ( pluto_codegen_clang::EMIT_CODE_TYPE _emit_code_type ) :
+      emit_code_type(_emit_code_type)
+    {
 
     }
      // is the function that is called if the matcher finds something
      virtual void run(const MatchFinder::MatchResult &Result){
-       std::cout << "callback called " << std::endl;
+       std::cout << "plugin callback called " << std::endl;
        ASTContext& context = *Result.Context;
        SourceManager& SM = context.getSourceManager();
 
@@ -416,7 +441,7 @@ class Callback : public MatchFinder::MatchCallback {
 	 if ( auto* for_stmt = Result.Nodes.getNodeAs<ForStmt>("for_stmt") ) {
 	   auto loc = for_stmt->getLocStart();
 	   if ( SM.isInMainFile( loc ) ) {
-	     extract_scop_with_pet( context, for_stmt, function_decl );
+	     extract_scop_with_pet( context, for_stmt, function_decl, emit_code_type );
 	   }
 	   //else{
 	   //  std::cout << "location of for_stmt is not in the main file but in " << SM.getFilename(loc).str() << std::endl;
@@ -425,12 +450,17 @@ class Callback : public MatchFinder::MatchCallback {
        }
 
      }
+
+  private:
+     pluto_codegen_clang::EMIT_CODE_TYPE emit_code_type;
 };
 
 class ForLoopConsumer : public ASTConsumer {
 public:
 
-  ForLoopConsumer(CompilerInstance& _Instance) 
+  
+  ForLoopConsumer( pluto_codegen_clang::EMIT_CODE_TYPE _emit_code_type) :
+    emit_code_type(_emit_code_type)
   { 
     std::cout << "for loop consumer created " << this << std::endl;
   }
@@ -450,15 +480,22 @@ public:
 
 #if 1
   void HandleTranslationUnit( ASTContext& clang_ctx ) {
+    auto begin = std::chrono::high_resolution_clock::now();
     ctr = 0;
     MatchFinder Finder;
-    Callback Fixer;
+    Callback Fixer(emit_code_type);
     std::cout << "adding matcher" << std::endl;
     Finder.addMatcher( makeForLoopMatcher(), &Fixer);
     std::cout << "running matcher" << std::endl;
     Finder.matchAST(clang_ctx);
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> diff = end-begin;
+    std::cout << "plugin time consumption " << diff.count() << " s" << std::endl;
   }
 #endif
+
+private: 
+  pluto_codegen_clang::EMIT_CODE_TYPE emit_code_type;
 
 };
 
@@ -485,20 +522,15 @@ class ClanAction : public PluginASTAction {
   //std::set<std::string> ParsedTemplates;
 protected:
 
-  enum EMIT_CODE_TYPE{
-      EMIT_ACC,
-      EMIT_OPENMP,
-      EMIT_HPX,
-      EMIT_LIST_END
-  };
-  EMIT_CODE_TYPE emit_code_type = EMIT_ACC;
+
+    pluto_codegen_clang::EMIT_CODE_TYPE emit_code_type = pluto_codegen_clang::EMIT_ACC;
 
   // NOTE: stefan this creates the consumer that is given the TU after everything is done
   std::unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance &CI,
                                                  llvm::StringRef) override {
 
     std::cout << "makeing new Consumer object with compiler instance " << &CI << std::endl;
-    auto ret =  llvm::make_unique<ForLoopConsumer>(CI);
+    auto ret =  llvm::make_unique<ForLoopConsumer>(emit_code_type);
     std::cout << "at load ci " << ret.get() << " instance " << &CI << " ast context " << &CI.getASTContext() << " sm " << &CI.getSourceManager() << std::endl;
     std::cout << "done with the new consumer object" << std::endl;
     return std::move(ret);
@@ -509,6 +541,7 @@ protected:
     ros << "Help for Clan plugin goes here\n";
   }
 
+  // TODO add instructions on how to do that
   // #stefan: here one can parse some arugments for this plugin
   bool ParseArgs(const CompilerInstance &CI,
                  const std::vector<std::string> &args) override {
@@ -518,17 +551,17 @@ protected:
 
       if ( args[i] == "-emit-openacc" ) {
 	std::cout << "emiting openacc" << std::endl;
-	emit_code_type = EMIT_ACC;
+	emit_code_type = pluto_codegen_clang::EMIT_ACC;
       }
 
       if ( args[i] == "-emit-openmp" ) {
 	std::cout << "emiting openmp" << std::endl;
-	emit_code_type = EMIT_OPENMP;
+	emit_code_type = pluto_codegen_clang::EMIT_OPENMP;
       }
 
       if ( args[i] == "-emit-hpx" ) {
 	std::cout << "emiting hpx" << std::endl;
-	emit_code_type = EMIT_HPX;
+	emit_code_type = pluto_codegen_clang::EMIT_HPX;
       }
 
     }

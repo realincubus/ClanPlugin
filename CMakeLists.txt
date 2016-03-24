@@ -37,7 +37,7 @@ include_directories( pluto_codegen_clang )
 include_directories( pluto_src/src )
 
 
-add_llvm_loadable_module(ClanPlugin ClanPlugin.cpp)
+add_llvm_loadable_module(ClanPlugin ClanPlugin.cpp stdlib_matchers.cpp )
 target_link_libraries( ClanPlugin clangASTMatchers libclang plutocore pluto_codegen_clang pet isl clangSema )
 
 #set_target_properties( ClanPlugin PROPERTIES COMPILE_FLAGS -fsanitize=address)
@@ -69,6 +69,6 @@ add_library ( plutocore SHARED
   pluto_src/src/pluto_codegen_if.c
 )
 
-target_link_libraries( plutocore pluto clast-clang_acc )
+target_link_libraries( plutocore pluto clast-clang )
 
 
