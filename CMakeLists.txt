@@ -15,7 +15,7 @@ set_property(TARGET cloog-isl PROPERTY IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_
 # TODO change this to search for the lib
 add_library( pet STATIC IMPORTED)
 #set_property(TARGET pet PROPERTY IMPORTED_LOCATION /opt/pet-git/lib/libpet.so )
-set_property(TARGET pet PROPERTY IMPORTED_LOCATION /home/incubus/dev/pet/.libs/libpet.a )
+set_property(TARGET pet PROPERTY IMPORTED_LOCATION /home/incubus/dev/pet_patched/.libs/libpet.a )
 #set_property(TARGET pet PROPERTY IMPORTED_LOCATION /home/incubus/dev/pet/.libs/libpet.so )
 
 add_library( isl SHARED IMPORTED)
