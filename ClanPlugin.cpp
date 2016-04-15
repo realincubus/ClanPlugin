@@ -75,6 +75,7 @@ extern "C"{
       isl_union_map* write, 
       isl_union_map* empty, 
       isl_union_set* domain,
+      isl_set* context,
       PlutoOptions* options 
   );
 }
@@ -227,6 +228,15 @@ void build_rename_table( isl_union_set* domains, std::vector<int>& table ) {
   
 }
 
+static isl_stat correct_alignment( __isl_take isl_map *schedule, void* user ){
+  std::pair<pet_scop*,isl_union_map*>* user_data = (std::pair<pet_scop*,isl_union_map*>*)user;
+
+  // correcting schedule 
+  auto new_schedule = isl_map_align_params(schedule, isl_set_get_space(user_data->first->context));
+  isl_union_map_add_map( user_data->second, new_schedule );
+  return (isl_stat)0;
+}
+
 #if 1
 PlutoProg* compute_deps( pet_scop* pscop, PlutoOptions* options ) {
 
@@ -247,7 +257,22 @@ PlutoProg* compute_deps( pet_scop* pscop, PlutoOptions* options ) {
     empty = linearize_union_map( pscop, empty, rename_table );
   }
 
-  return pluto_compute_deps( schedule, read, write, empty, domains, options );
+  isl_set* context = pscop->context;
+  std::cerr << "calling pluto_compute_deps with this context " << std::endl;
+  isl_set_dump( pscop->context );
+
+  // TODO plutos pet branch sais that the schedule is not aligned with 
+  //      the context. i dont know whether this is still needed after 
+  //      pet also changed since the pet branch implementation
+#if 0
+  isl_union_map* new_schedule = isl_union_map_empty(isl_set_get_space(pscop->context));
+  std::pair<pet_scop*,isl_union_map*> user_data = std::make_pair( pscop, new_schedule );
+  isl_union_map_foreach_map( schedule, correct_alignment, &user_data );
+
+  schedule = new_schedule;
+#endif
+
+  return pluto_compute_deps( schedule, read, write, empty, domains, context, options );
 }
 #endif
 
@@ -381,7 +406,7 @@ std::string getSourceText( SourceLocation starts_with,
     CharSourceRange::getTokenRange(
       SourceRange(
 	Lexer::getLocForEndOfToken(starts_with,0,SM,LangOptions()), 
-	ends_with
+	Lexer::getLocForEndOfToken(ends_with,0,SM,LangOptions()) 
       )
     ), 
     SM,
@@ -391,6 +416,7 @@ std::string getSourceText( SourceLocation starts_with,
   std::cout << "parsed: " << ret << std::endl;
 
   lexer_result += ret;
+
   // to skip the closing bracket if its present
   if ( skip_end ) {
     lexer_result = lexer_result.substr( 0, lexer_result.size()-1);
@@ -418,7 +444,7 @@ void replace_with_placeholder( pet_loc* loc, std::vector<NamedDecl*>& parameters
   // translate this to a source locations 
   std::cout << "statement at " << pet_loc_get_start(loc) << " to " << pet_loc_get_end( loc ) << std::endl;
   auto begin_stmt = sloc_file.getLocWithOffset( pet_loc_get_start(loc) );
-  auto end_stmt = sloc_file.getLocWithOffset( pet_loc_get_end(loc) );
+  auto end_stmt = sloc_file.getLocWithOffset( pet_loc_get_end(loc)-1 );
   std::cout << "begin loc " << begin_stmt.printToString(SM) << std::endl;
   std::cout << "end loc " << end_stmt.printToString(SM) << std::endl;
   
@@ -451,7 +477,7 @@ std::vector<std::string> get_statement_texts( pet_scop* scop, SourceLocation slo
 }
 
 
-static void create_scop_replacement( ASTContext& ctx_clang, pet_scop* scop, const ForStmt* for_stmt, pluto_codegen_clang::EMIT_CODE_TYPE emit_code_type ) {
+static void create_scop_replacement( ASTContext& ctx_clang, pet_scop* scop, const ForStmt* for_stmt, pluto_codegen_clang::EMIT_CODE_TYPE emit_code_type, bool write_cloog_file ) {
 
   SourceManager& SM = ctx_clang.getSourceManager();
   DiagnosticsEngine& diag = ctx_clang.getDiagnostics();
@@ -467,6 +493,8 @@ static void create_scop_replacement( ASTContext& ctx_clang, pet_scop* scop, cons
   auto begin_scop = sloc_file.getLocWithOffset( pet_loc_get_start(loc) );
   auto end_scop = sloc_file.getLocWithOffset( pet_loc_get_end(loc) );
 
+  pet_scop_align_params( scop );
+
   auto begin_pluto = std::chrono::high_resolution_clock::now();
     // find prallelism
     PlutoOptions* pluto_options = pluto_options_alloc(); // memory leak if something goes wrong
@@ -476,9 +504,15 @@ static void create_scop_replacement( ASTContext& ctx_clang, pet_scop* scop, cons
     // TODO this is a catastrophe !!!!! remove it
     options = pluto_options;
 
-    std::cout << "generating pluto program from pet" << std::endl;
+    std::cerr << "generating pluto program from pet" << std::endl;
     auto prog = pet_to_pluto_prog(scop, pluto_options);
-    std::cout << "done generating pluto program from scop" << std::endl;
+    if ( !prog ) {
+      std::cerr << "could not generate a pluto program from the given pet_scop" << std::endl;
+      // TODO memory leak put everything into unique_ptr
+      return;
+    }else{
+      std::cerr << "done generating pluto program from scop" << std::endl;
+    }
 
     std::cout << "schedule pluto prog" << std::endl;
     
@@ -520,6 +554,14 @@ static void create_scop_replacement( ASTContext& ctx_clang, pet_scop* scop, cons
   fprintf(cloogfp, "\n");
   fclose( cloogfp );
 
+
+  if ( write_cloog_file ) {
+    // TODO make filename relative to file handled
+    FILE* debug_cloogfp = fopen( "pluto.cloog", "w" ); 
+    pluto_gen_cloog_file(debug_cloogfp, prog);
+    fclose( debug_cloogfp );
+  }
+
   // TODO needed to debug a int double problem
 #if 0
   // DEBUG: Write it to the screen
@@ -559,7 +601,7 @@ static void create_scop_replacement( ASTContext& ctx_clang, pet_scop* scop, cons
 }
 
 
-static void extract_scop_with_pet( ASTContext& ctx_clang, const ForStmt* for_stmt, const FunctionDecl* function_decl, pluto_codegen_clang::EMIT_CODE_TYPE emit_code_type ) {
+static void extract_scop_with_pet( ASTContext& ctx_clang, const ForStmt* for_stmt, const FunctionDecl* function_decl, pluto_codegen_clang::EMIT_CODE_TYPE emit_code_type, bool write_cloog_file ) {
   
   DiagnosticsEngine& diag = ctx_clang.getDiagnostics();
   SourceManager& SM = ctx_clang.getSourceManager();
@@ -586,14 +628,15 @@ static void extract_scop_with_pet( ASTContext& ctx_clang, const ForStmt* for_stm
 
   if ( scop ) {
     std::cout << "found a valid scop" << std::endl;
-    create_scop_replacement( ctx_clang, scop, for_stmt, emit_code_type );
+    create_scop_replacement( ctx_clang, scop, for_stmt, emit_code_type, write_cloog_file );
   }
 }
 
 class Callback : public MatchFinder::MatchCallback {
   public:
-    Callback ( pluto_codegen_clang::EMIT_CODE_TYPE _emit_code_type ) :
-      emit_code_type(_emit_code_type)
+    Callback ( pluto_codegen_clang::EMIT_CODE_TYPE _emit_code_type, bool _write_cloog_file ) :
+      emit_code_type(_emit_code_type),
+      write_cloog_file(_write_cloog_file)
     {
 
     }
@@ -607,7 +650,7 @@ class Callback : public MatchFinder::MatchCallback {
 	 if ( auto* for_stmt = Result.Nodes.getNodeAs<ForStmt>("for_stmt") ) {
 	   auto loc = for_stmt->getLocStart();
 	   if ( SM.isInMainFile( loc ) ) {
-	     extract_scop_with_pet( context, for_stmt, function_decl, emit_code_type );
+	     extract_scop_with_pet( context, for_stmt, function_decl, emit_code_type, write_cloog_file );
 	   }
 	   //else{
 	   //  std::cout << "location of for_stmt is not in the main file but in " << SM.getFilename(loc).str() << std::endl;
@@ -619,14 +662,16 @@ class Callback : public MatchFinder::MatchCallback {
 
   private:
      pluto_codegen_clang::EMIT_CODE_TYPE emit_code_type;
+     bool write_cloog_file;
 };
 
 class ForLoopConsumer : public ASTConsumer {
 public:
 
   
-  ForLoopConsumer( pluto_codegen_clang::EMIT_CODE_TYPE _emit_code_type) :
-    emit_code_type(_emit_code_type)
+  ForLoopConsumer( pluto_codegen_clang::EMIT_CODE_TYPE _emit_code_type, bool _write_cloog_file) :
+    emit_code_type(_emit_code_type),
+    write_cloog_file(_write_cloog_file)
   { 
     std::cout << "for loop consumer created " << this << std::endl;
   }
@@ -649,7 +694,7 @@ public:
     auto begin = std::chrono::high_resolution_clock::now();
     ctr = 0;
     MatchFinder Finder;
-    Callback Fixer(emit_code_type);
+    Callback Fixer(emit_code_type, write_cloog_file);
     std::cout << "adding matcher" << std::endl;
     Finder.addMatcher( makeForLoopMatcher(), &Fixer);
     std::cout << "running matcher" << std::endl;
@@ -662,6 +707,7 @@ public:
 
 private: 
   pluto_codegen_clang::EMIT_CODE_TYPE emit_code_type;
+  bool write_cloog_file;
 
 };
 
@@ -690,13 +736,14 @@ protected:
 
 
     pluto_codegen_clang::EMIT_CODE_TYPE emit_code_type = pluto_codegen_clang::EMIT_ACC;
+    bool write_cloog_file = false;
 
   // NOTE: stefan this creates the consumer that is given the TU after everything is done
   std::unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance &CI,
                                                  llvm::StringRef) override {
 
     std::cout << "makeing new Consumer object with compiler instance " << &CI << std::endl;
-    auto ret =  llvm::make_unique<ForLoopConsumer>(emit_code_type);
+    auto ret =  llvm::make_unique<ForLoopConsumer>(emit_code_type, write_cloog_file);
     std::cout << "at load ci " << ret.get() << " instance " << &CI << " ast context " << &CI.getASTContext() << " sm " << &CI.getSourceManager() << std::endl;
     std::cout << "done with the new consumer object" << std::endl;
     return std::move(ret);
@@ -728,6 +775,11 @@ protected:
       if ( args[i] == "-emit-hpx" ) {
 	std::cout << "emiting hpx" << std::endl;
 	emit_code_type = pluto_codegen_clang::EMIT_HPX;
+      }
+
+      if ( args[i] == "-write-cloog-file" ) {
+	std::cout << "writing cloog file" << std::endl;
+	write_cloog_file = true;
       }
 
     }
