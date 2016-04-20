@@ -747,10 +747,10 @@ class ClanAction : public PluginASTAction {
   public:
     ClanAction(){
       if ( once ) {
-	std::freopen("/home/incubus/log/clan_redir_stdout.log", "a", stdout);
-	std::freopen("/home/incubus/log/clan_redir_stderr.log", "a", stderr);
-	setvbuf ( stdout , NULL , _IOLBF , 1024 );
-	setvbuf ( stderr , NULL , _IOLBF , 1024 );
+	//std::freopen("/home/incubus/log/clan_redir_stdout.log", "a", stdout);
+	//std::freopen("/home/incubus/log/clan_redir_stderr.log", "a", stderr);
+	//setvbuf ( stdout , NULL , _IOLBF , 1024 );
+	//setvbuf ( stderr , NULL , _IOLBF , 1024 );
 	once = false;
       }
       std::cout << "clang action " << this << " created " << std::endl;
