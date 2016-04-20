@@ -27,22 +27,26 @@
 #include <sstream>
 #include <map>
 #include <fstream>
-#include <pluto/libpluto.h>
 #include <string>
-#include "pluto_codegen_clang.hpp"
 #include <thread>
 #include <signal.h>
 #include <setjmp.h>
 #include <map>
 #include <clang/AST/AST.h>
-#include "pet.h"
-#include "pet_cxx.h"
 #include "stdlib_matchers.hpp"
 
 #include <isl/options.h>
 #include <isl/arg.h>
 #include <isl/flow.h>
 #include <isl/map.h>
+#include <isl/set.h>
+#include <isl/ctx.h>
+
+#include <libpluto.h>
+#include <pluto_codegen_cxx.hpp>
+
+#include "pet.h"
+#include "pet_cxx.h"
 
 extern "C"{
 // TODO PlutoProg is not known outside of libpluto
@@ -86,59 +90,11 @@ struct set_rename_data {
     std::vector<int>* rename_table;
 };
 
-#if 1
-static isl_stat rename_tuple( __isl_take isl_set* set, void* user ){
-  set_rename_data* user_data = (set_rename_data*)(user);
-
-  const char *name = isl_set_get_tuple_name(set);
-  char *new_name = (char*)malloc(sizeof(const char) * 10 );
-
-  // extract name and change it with the rename table
-  assert(isdigit(name[2]));
-  int id = atoi(&name[2]);
-
-  sprintf( new_name, "S_%d", (*user_data->rename_table)[id] );
-
-  std::cerr << "renaming from " << name << " to " << new_name << std::endl;    
-
-  auto new_isl_set = isl_set_set_tuple_name(set, new_name );
-  isl_set_dump( new_isl_set );
-  const char *set_name = isl_set_get_tuple_name(new_isl_set);
-  std::cerr << "done renaming new name is " << set_name << std::endl;    
-
-  isl_union_set_add_set( user_data->new_set, new_isl_set );
-
-  return (isl_stat)0;
-}
-
 struct map_rename_data {
     isl_union_map* new_map;
     std::vector<int>* rename_table;
 };
 
-static isl_stat rename_map_tuple( __isl_take isl_map* map, void* user ){
-  map_rename_data* user_data = (map_rename_data*)(user);
-
-  isl_dim_type t = isl_dim_in;
-  const char *name = isl_map_get_tuple_name(map,t);
-  char *new_name = (char*)malloc(sizeof(const char) * 10 );
-
-  assert(isdigit(name[2]));
-  int id = atoi(&name[2]);
-
-  sprintf( new_name, "S_%d", (*user_data->rename_table)[id] );
-  std::cerr << "renaming from " <<  name << " to " << new_name << std::endl;    
-  
-  isl_map_dump( map );
-  auto new_isl_map = isl_map_set_tuple_name(map,t, new_name );
-  isl_map_dump( new_isl_map );
-  const char *set_name = isl_map_get_tuple_name(new_isl_map, t );
-  std::cerr << "done renaming" << std::endl;    
-
-  isl_union_map_add_map( user_data->new_map, new_isl_map );
-
-  return (isl_stat)0;
-}
 
 // let the domain names be in accending order without gaps
 isl_union_set* linearize_domains( pet_scop* pscop, isl_union_set* domains, std::vector<int>& rename_table ) {
@@ -149,10 +105,34 @@ isl_union_set* linearize_domains( pet_scop* pscop, isl_union_set* domains, std::
   user_data.new_set = new_domain; 
   user_data.rename_table = &rename_table;
 
-  isl_union_set_foreach_set(domains, &rename_tuple, &user_data);
+  isl_union_set_foreach_set(domains, 
+      []( __isl_take isl_set* set, void* user ){
+	  set_rename_data* user_data = (set_rename_data*)(user);
+
+	  const char *name = isl_set_get_tuple_name(set);
+	  char *new_name = (char*)malloc(sizeof(const char) * 10 );
+
+	  // extract name and change it with the rename table
+	  assert(isdigit(name[2]));
+	  int id = atoi(&name[2]);
+
+	  sprintf( new_name, "S_%d", (*user_data->rename_table)[id] );
+
+	  std::cerr << "renaming from " << name << " to " << new_name << std::endl;    
+
+	  auto new_isl_set = isl_set_set_tuple_name(set, new_name );
+	  isl_set_dump( new_isl_set );
+	  const char *set_name = isl_set_get_tuple_name(new_isl_set);
+	  std::cerr << "done renaming new name is " << set_name << std::endl;    
+
+	  isl_union_set_add_set( user_data->new_set, new_isl_set );
+
+	  return (isl_stat)0;    
+      }, 
+      &user_data
+  );
   return new_domain;
 }
-#endif
 
 isl_union_map* linearize_union_map( pet_scop* pscop, isl_union_map* schedule, std::vector<int>& rename_table){
   map_rename_data user_data;
@@ -160,43 +140,56 @@ isl_union_map* linearize_union_map( pet_scop* pscop, isl_union_map* schedule, st
   user_data.new_map = new_map; 
   user_data.rename_table = &rename_table;
 
-  isl_union_map_foreach_map(schedule, &rename_map_tuple, &user_data); 
+  isl_union_map_foreach_map(schedule, 
+      []( __isl_take isl_map* map, void* user ) {
+	map_rename_data* user_data = (map_rename_data*)(user);
+
+	isl_dim_type t = isl_dim_in;
+	const char *name = isl_map_get_tuple_name(map,t);
+	char *new_name = (char*)malloc(sizeof(const char) * 10 );
+
+	assert(isdigit(name[2]));
+	int id = atoi(&name[2]);
+
+	sprintf( new_name, "S_%d", (*user_data->rename_table)[id] );
+	std::cerr << "renaming from " <<  name << " to " << new_name << std::endl;    
+	
+	isl_map_dump( map );
+	auto new_isl_map = isl_map_set_tuple_name(map,t, new_name );
+	isl_map_dump( new_isl_map );
+	const char *set_name = isl_map_get_tuple_name(new_isl_map, t );
+	std::cerr << "done renaming" << std::endl;    
+
+	isl_union_map_add_map( user_data->new_map, new_isl_map );
+
+	return (isl_stat)0;    
+      }, 
+      &user_data
+  ); 
+
   return new_map;
-}
-
-static isl_stat get_max_stmt_id(__isl_take isl_set *set, void *user)
-{
-    printf("Line %d %s\n",__LINE__,__FILE__);
-    int* max_id = (int*) user;
-
-    /* A statement's domain (isl_set) should be named S_%d */
-    const char *name = isl_set_get_tuple_name(set);
-    assert(isdigit(name[2]));
-    int id = atoi(&name[2]);
-    if ( id > *max_id ) {
-      *max_id = id;
-    }
-    return (isl_stat)0;
-} 
-
-static isl_stat has_stmt_id ( __isl_take isl_set *set, void* user ){
-  std::pair<int,int>* find_id = (std::pair<int,int>*) user;
-  
-  const char *name = isl_set_get_tuple_name(set);
-  assert(isdigit(name[2]));
-  int id = atoi(&name[2]);
-  if ( find_id->first == id ) {
-    find_id->second = id;
-    return (isl_stat)1;
-  }
-  return (isl_stat)0; 
 }
 
 void build_rename_table( isl_union_set* domains, std::vector<int>& table ) {
   
   // get the highest number
   int max_id = -1;
-  isl_union_set_foreach_set(domains, &get_max_stmt_id, &max_id);
+  isl_union_set_foreach_set(domains, 
+      []( __isl_take isl_set* set, void* user ){
+	printf("Line %d %s\n",__LINE__,__FILE__);
+	int* max_id = (int*) user;
+
+	/* A statement's domain (isl_set) should be named S_%d */
+	const char *name = isl_set_get_tuple_name(set);
+	assert(isdigit(name[2]));
+	int id = atoi(&name[2]);
+	if ( id > *max_id ) {
+	  *max_id = id;
+	}
+	return (isl_stat)0;
+      }, 
+      &max_id
+  );
   if ( max_id <= 0 ) return;
 
   // for half open range usage
@@ -209,7 +202,22 @@ void build_rename_table( isl_union_set* domains, std::vector<int>& table ) {
   // i cannot assume that the domains are in order so i have to search through the list
   for (int i = 0; i < max_id; ++i){
     std::pair<int,int> find_id = std::make_pair( i, -1 );
-    isl_union_set_foreach_set(domains, &has_stmt_id, &find_id);
+    isl_union_set_foreach_set(domains, 
+	[]( __isl_take isl_set* set, void* user ){
+
+	  std::pair<int,int>* find_id = (std::pair<int,int>*) user;
+  
+	  const char *name = isl_set_get_tuple_name(set);
+	  assert(isdigit(name[2]));
+	  int id = atoi(&name[2]);
+	  if ( find_id->first == id ) {
+	    find_id->second = id;
+	    return (isl_stat)1;
+	  }
+	  return (isl_stat)0;   
+	}, 
+	&find_id
+    );
     if ( find_id.second != -1 ) {
       table[find_id.second] = new_id++;
     }
@@ -261,7 +269,7 @@ PlutoProg* compute_deps( pet_scop* pscop, PlutoOptions* options ) {
   std::cerr << "calling pluto_compute_deps with this context " << std::endl;
   isl_set_dump( pscop->context );
 
-  // TODO plutos pet branch sais that the schedule is not aligned with 
+  // TODO plutos pet branch says that the schedule is not aligned with 
   //      the context. i dont know whether this is still needed after 
   //      pet also changed since the pet branch implementation
 #if 0
@@ -271,6 +279,63 @@ PlutoProg* compute_deps( pet_scop* pscop, PlutoOptions* options ) {
 
   schedule = new_schedule;
 #endif
+
+  // TODO pluto complains about non unified basic sets in the domains
+  //      to overcome this i will simply unify them in isl before passing them to pluto
+  
+  // loop over all domains 
+  isl_union_set_foreach_set( domains, 
+      []( __isl_take isl_set* set, void* user_data ) {
+	std::cerr << "isl set before unification" << std::endl;
+	isl_set_dump( set );
+	auto rrs = isl_set_remove_redundancies( set );
+	std::cerr << "rrs" << std::endl;
+	isl_set_dump( rrs );
+
+	auto cset = isl_set_coalesce( set );
+	auto n_set = isl_set_n_basic_set( set );
+	std::cerr << "coalesce result with n basic sets " << n_set  << std::endl;
+	isl_set_dump( cset );
+
+	auto iset = isl_set_union( isl_set_copy(set), isl_set_copy(set) );
+	auto ni_set = isl_set_n_basic_set( iset );
+	std::cerr << "intersection result " << ni_set  << std::endl;
+	isl_set_dump ( iset );
+
+#if 1
+	isl_set* uni = nullptr;
+	isl_set_foreach_basic_set ( set , 
+	    [] ( __isl_take isl_basic_set* bset, void* user_data ) {
+	      isl_set** uni = (isl_set**)user_data;
+	      std::cerr << "basic set: "   << std::endl;
+	      isl_basic_set_dump( bset );
+#if 0
+	      if ( *uni == nullptr ) {
+		std::cerr << "setting first basic set" << std::endl;
+		// promote the basic set to a set
+		auto bset_set = isl_set_from_basic_set( bset );
+		*uni = bset_set;
+	      }else{
+		std::cerr << "first set already set -> unionizing" << std::endl;
+		auto bset_set = isl_set_from_basic_set( bset );
+		isl_set* new_bset = isl_set_union( *uni, bset_set );
+		auto n_bset = isl_set_n_basic_set( new_bset );
+		std::cerr << "dumping the union with n basic sets " << n_bset << std::endl;
+		isl_set_dump( new_bset );
+		std::cerr << "done dumping the union" << std::endl;
+
+	      }
+#endif
+	      return (isl_stat)0;
+	    },
+	    &uni
+	);
+	std::cerr << std::endl << std::endl;
+#endif
+	return (isl_stat)0;
+      },
+      nullptr
+  );
 
   return pluto_compute_deps( schedule, read, write, empty, domains, context, options );
 }
@@ -477,7 +542,7 @@ std::vector<std::string> get_statement_texts( pet_scop* scop, SourceLocation slo
 }
 
 
-static void create_scop_replacement( ASTContext& ctx_clang, pet_scop* scop, const ForStmt* for_stmt, pluto_codegen_clang::EMIT_CODE_TYPE emit_code_type, bool write_cloog_file ) {
+static void create_scop_replacement( ASTContext& ctx_clang, pet_scop* scop, const ForStmt* for_stmt, pluto_codegen_cxx::EMIT_CODE_TYPE emit_code_type, bool write_cloog_file ) {
 
   SourceManager& SM = ctx_clang.getSourceManager();
   DiagnosticsEngine& diag = ctx_clang.getDiagnostics();
@@ -502,7 +567,7 @@ static void create_scop_replacement( ASTContext& ctx_clang, pet_scop* scop, cons
     pluto_options->debug = true;
     pluto_options->isldep = true;
     // TODO this is a catastrophe !!!!! remove it
-    options = pluto_options;
+    //options = pluto_options;
 
     std::cerr << "generating pluto program from pet" << std::endl;
     auto prog = pet_to_pluto_prog(scop, pluto_options);
@@ -517,9 +582,8 @@ static void create_scop_replacement( ASTContext& ctx_clang, pet_scop* scop, cons
     std::cout << "schedule pluto prog" << std::endl;
     
     // the pluto_function returns a number that indicated how many loops are parallel 
-    int parallel_loops = pluto_schedule_pluto( prog, options );
+    int parallel_loops = pluto_schedule_pluto( prog, pluto_options );
     std::cout << "schedule_pluto done " << std::endl;
-    std::cout << "ClanPlugin " << prog->ndeps << std::endl;
   auto end_pluto = std::chrono::high_resolution_clock::now();
   std::chrono::duration<double> diff = end_pluto-begin_pluto;
   std::cout << "pluto time consumption " << diff.count() << " s" << std::endl;
@@ -545,43 +609,10 @@ static void create_scop_replacement( ASTContext& ctx_clang, pet_scop* scop, cons
   // find the text of the original statement
   auto statement_texts = get_statement_texts( scop, sloc_file, SM, for_stmt );
 
-  // cloog has to generate some file that can then be read by clast
-  // to make it faster and thread save, we put this into a memory buffer 
-  size_t in_memory_file_size = 2*1024*1024;
-  char in_memory_file[in_memory_file_size]; // 2MB should be ok for this crutch if this becomes a problem rewrite the code to use streams
-  FILE* cloogfp = fmemopen( in_memory_file, in_memory_file_size, "w" ); 
-  pluto_gen_cloog_file(cloogfp, prog);
-  fprintf(cloogfp, "\n");
-  fclose( cloogfp );
-
-
-  if ( write_cloog_file ) {
-    // TODO make filename relative to file handled
-    FILE* debug_cloogfp = fopen( "pluto.cloog", "w" ); 
-    pluto_gen_cloog_file(debug_cloogfp, prog);
-    fclose( debug_cloogfp );
-  }
-
-  // TODO needed to debug a int double problem
-#if 0
-  // DEBUG: Write it to the screen
-  cloogfp = fmemopen( in_memory_file, in_memory_file_size, "r" );
-  ssize_t read;
-  size_t len;
-  char * line = NULL;
-  while ((read = getline(&line, &len, cloogfp)) != -1) {
-    printf("%s", line);
-  }
-
-  fclose( cloogfp );
-  //
-#endif
-
-  cloogfp = fmemopen( in_memory_file, in_memory_file_size, "r" );
 
   std::stringstream outfp;
 
-  if ( pluto_codegen_clang::pluto_multicore_codegen( outfp, prog, cloogfp, statement_texts, emit_code_type ) == EXIT_FAILURE ) {
+  if ( pluto_codegen_cxx::pluto_multicore_codegen( outfp, prog, statement_texts, emit_code_type, write_cloog_file ) == EXIT_FAILURE ) {
     // stop if codegeneration failed
     return;
   }
@@ -601,7 +632,7 @@ static void create_scop_replacement( ASTContext& ctx_clang, pet_scop* scop, cons
 }
 
 
-static void extract_scop_with_pet( ASTContext& ctx_clang, const ForStmt* for_stmt, const FunctionDecl* function_decl, pluto_codegen_clang::EMIT_CODE_TYPE emit_code_type, bool write_cloog_file ) {
+static void extract_scop_with_pet( ASTContext& ctx_clang, const ForStmt* for_stmt, const FunctionDecl* function_decl, pluto_codegen_cxx::EMIT_CODE_TYPE emit_code_type, bool write_cloog_file ) {
   
   DiagnosticsEngine& diag = ctx_clang.getDiagnostics();
   SourceManager& SM = ctx_clang.getSourceManager();
@@ -634,7 +665,7 @@ static void extract_scop_with_pet( ASTContext& ctx_clang, const ForStmt* for_stm
 
 class Callback : public MatchFinder::MatchCallback {
   public:
-    Callback ( pluto_codegen_clang::EMIT_CODE_TYPE _emit_code_type, bool _write_cloog_file ) :
+    Callback ( pluto_codegen_cxx::EMIT_CODE_TYPE _emit_code_type, bool _write_cloog_file ) :
       emit_code_type(_emit_code_type),
       write_cloog_file(_write_cloog_file)
     {
@@ -661,7 +692,7 @@ class Callback : public MatchFinder::MatchCallback {
      }
 
   private:
-     pluto_codegen_clang::EMIT_CODE_TYPE emit_code_type;
+     pluto_codegen_cxx::EMIT_CODE_TYPE emit_code_type;
      bool write_cloog_file;
 };
 
@@ -669,7 +700,7 @@ class ForLoopConsumer : public ASTConsumer {
 public:
 
   
-  ForLoopConsumer( pluto_codegen_clang::EMIT_CODE_TYPE _emit_code_type, bool _write_cloog_file) :
+  ForLoopConsumer( pluto_codegen_cxx::EMIT_CODE_TYPE _emit_code_type, bool _write_cloog_file) :
     emit_code_type(_emit_code_type),
     write_cloog_file(_write_cloog_file)
   { 
@@ -681,10 +712,19 @@ public:
   }
 
 
+  // all for loops that dont have a nested for loop
   DeclarationMatcher makeForLoopMatcher(){
     return functionDecl(
 	forEachDescendant(
-	  forStmt().bind("for_stmt")
+	  forStmt(
+#if 0
+	    unless(
+	      hasDescendant(
+		forStmt()
+	      )
+	    )
+#endif
+	  ).bind("for_stmt")
 	)	  
     ).bind("function_decl");
   }
@@ -706,7 +746,7 @@ public:
 #endif
 
 private: 
-  pluto_codegen_clang::EMIT_CODE_TYPE emit_code_type;
+  pluto_codegen_cxx::EMIT_CODE_TYPE emit_code_type;
   bool write_cloog_file;
 
 };
@@ -735,7 +775,7 @@ class ClanAction : public PluginASTAction {
 protected:
 
 
-    pluto_codegen_clang::EMIT_CODE_TYPE emit_code_type = pluto_codegen_clang::EMIT_ACC;
+    pluto_codegen_cxx::EMIT_CODE_TYPE emit_code_type = pluto_codegen_cxx::EMIT_ACC;
     bool write_cloog_file = false;
 
   // NOTE: stefan this creates the consumer that is given the TU after everything is done
@@ -764,17 +804,17 @@ protected:
 
       if ( args[i] == "-emit-openacc" ) {
 	std::cout << "emiting openacc" << std::endl;
-	emit_code_type = pluto_codegen_clang::EMIT_ACC;
+	emit_code_type = pluto_codegen_cxx::EMIT_ACC;
       }
 
       if ( args[i] == "-emit-openmp" ) {
 	std::cout << "emiting openmp" << std::endl;
-	emit_code_type = pluto_codegen_clang::EMIT_OPENMP;
+	emit_code_type = pluto_codegen_cxx::EMIT_OPENMP;
       }
 
       if ( args[i] == "-emit-hpx" ) {
 	std::cout << "emiting hpx" << std::endl;
-	emit_code_type = pluto_codegen_clang::EMIT_HPX;
+	emit_code_type = pluto_codegen_cxx::EMIT_HPX;
       }
 
       if ( args[i] == "-write-cloog-file" ) {
