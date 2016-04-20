@@ -19,11 +19,8 @@ SET( ISL15_INCLUDE_DIR ISL15_INCLUDE_DIR-NOTFOUND )
 find_package(pluto)
 # search for pluto_codegen_cxx
 find_package(pluto_codegen_cxx)
-# TODO search for pet and pets isl version
+# search for pet and pets isl version
 find_package(pet)
-# remove this 
-#find_package(isl15)
-
 
 include_directories( ${PET_INCLUDE_DIR} )
 include_directories( ${PET_ISL_INCLUDE_DIR} )

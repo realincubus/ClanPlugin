@@ -49,21 +49,8 @@
 #include "pet_cxx.h"
 
 extern "C"{
-// TODO PlutoProg is not known outside of libpluto
-//      since i want to write my own unparser thats not a big problem but its definitly something i 
-//      want to change temporarily
-//      
-//int pluto_multicore_codegen(FILE *cloogfp, FILE *outfp, const PlutoProg *prog);
-//PlutoProg *scop_to_pluto_prog(osl_scop_p scop, PlutoOptions *options);
-//void pluto_prog_free(PlutoProg* prog);
-//int pluto_stmt_is_member_of(int stmt_id, Stmt **slist, int len);
-//void pluto_detect_transformation_properties(PlutoProg *prog);
+// TODO this has to go into the libpluto header
 int pluto_schedule_pluto( PlutoProg* prog, PlutoOptions* options );
-
-//int pet_tree_foreach_sub_tree(__isl_keep pet_tree *tree,
-//    int (*fn)(__isl_keep pet_tree *tree, void *user), void *user);
-
-
 }
 
 
@@ -74,6 +61,8 @@ using namespace clang::ast_matchers;
 namespace {
 
 extern "C"{
+  // TODO this has to go into one of plutos headers perhaps libpluto
+  // TODO rename this to isl_to_plutp_prog
   PlutoProg* pluto_compute_deps( isl_union_map* schedule, 
       isl_union_map* read, 
       isl_union_map* write, 
