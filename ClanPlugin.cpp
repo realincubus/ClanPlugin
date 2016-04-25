@@ -34,6 +34,8 @@
 #include <map>
 #include <clang/AST/AST.h>
 #include "stdlib_matchers.hpp"
+#include <memory>
+#include <map>
 
 #include <isl/options.h>
 #include <isl/arg.h>
@@ -356,11 +358,11 @@ public:
     if ( SM.isBeforeInTranslationUnit( decl_ref_loc_start , begin ) ) return true;
     if ( SM.isBeforeInTranslationUnit( end , decl_ref_loc_start ) ) return true;
 
-    std::cout << "visited a node" << std::endl;
+    std::cerr << "visited a node" << std::endl;
     for( auto i = 0 ; i < iterators.size() ; i++ ){
       auto& iterator = iterators[i];
       if ( declRefExpr->getDecl() == iterator ) {
-	std::cout << "found a reference" << std::endl;
+	std::cerr << "found a reference" << std::endl;
 	// push_this occurence to the list of excludes for this iterator
 	exclude_ranges.push_back( make_pair( declRefExpr->getSourceRange(), std::to_string(i)) );
 	return true;
@@ -386,8 +388,8 @@ std::vector<NamedDecl*> get_parameters_for_pet_stmt( pet_stmt* stmt ) {
     int in_param = isl_space_dim(space, isl_dim_in);
     int out_param = isl_space_dim(space, isl_dim_out);
 
-    std::cout << "in_param " << in_param << std::endl;
-    std::cout << "out_param " << out_param << std::endl;
+    std::cerr << "in_param " << in_param << std::endl;
+    std::cerr << "out_param " << out_param << std::endl;
 
     std::vector<NamedDecl*> parameters;
 
@@ -399,7 +401,7 @@ std::vector<NamedDecl*> get_parameters_for_pet_stmt( pet_stmt* stmt ) {
     if ( in_param > 0 ) {
       auto type = isl_dim_in;
       const char* name = isl_space_get_dim_name( space, type, 0 );
-      std::cout << "dim in param " << name << std::endl;
+      std::cerr << "dim in param " << name << std::endl;
       assert( 0 && "not implemented" );
     }
 
@@ -408,16 +410,16 @@ std::vector<NamedDecl*> get_parameters_for_pet_stmt( pet_stmt* stmt ) {
       auto type = isl_dim_out;
       const char* name = isl_space_get_dim_name( space, type, i );
       isl_id* id = isl_space_get_dim_id( space, type, i );
-      std::cout << "dim out param " << name << std::endl;
+      std::cerr << "dim out param " << name << std::endl;
       if ( id ) {
-	std::cout << "id " << id << std::endl;
+	std::cerr << "id " << id << std::endl;
 	void* user_data = isl_id_get_user( id );
 	if ( user_data ) {
 	  NamedDecl* named_decl = (NamedDecl*) user_data ;
 	  parameters.push_back( named_decl );
 	}
       }else{
-	std::cout << "no id" << std::endl;
+	std::cerr << "no id" << std::endl;
       }
     }
 
@@ -448,7 +450,7 @@ std::string getSourceText( SourceLocation starts_with,
       LangOptions()
     );
 
-    std::cout << "parsed: " << ret << std::endl;
+    std::cerr << "parsed: " << ret << std::endl;
 
     lexer_result += ret;
     lexer_result += std::string("...") + exclude.second + std::string("...");
@@ -467,7 +469,7 @@ std::string getSourceText( SourceLocation starts_with,
     LangOptions()
   );
 
-  std::cout << "parsed: " << ret << std::endl;
+  std::cerr << "parsed: " << ret << std::endl;
 
   lexer_result += ret;
 
@@ -484,7 +486,7 @@ std::string getSourceText( SourceLocation starts_with,
     }
   }
 
-  std::cout << "lexer_result: " << lexer_result << std::endl;
+  std::cerr << "lexer_result: " << lexer_result << std::endl;
 
   return lexer_result;
 
@@ -496,12 +498,13 @@ void replace_with_placeholder( pet_loc* loc, std::vector<NamedDecl*>& parameters
     std::vector<std::string>& statement_texts ) {
 
   // translate this to a source locations 
-  std::cout << "statement at " << pet_loc_get_start(loc) << " to " << pet_loc_get_end( loc ) << std::endl;
+  std::cerr << "statement at " << pet_loc_get_start(loc) << " to " << pet_loc_get_end( loc ) << std::endl;
   auto begin_stmt = sloc_file.getLocWithOffset( pet_loc_get_start(loc) );
   auto end_stmt = sloc_file.getLocWithOffset( pet_loc_get_end(loc)-1 );
-  std::cout << "begin loc " << begin_stmt.printToString(SM) << std::endl;
-  std::cout << "end loc " << end_stmt.printToString(SM) << std::endl;
+  std::cerr << "begin loc " << begin_stmt.printToString(SM) << std::endl;
+  std::cerr << "end loc " << end_stmt.printToString(SM) << std::endl;
   
+  // TODO i believe it should be enought to do this once
   DeclRefVisitor visitor(parameters, begin_stmt, end_stmt, SM);
   visitor.TraverseStmt( (ForStmt*)for_stmt );
 
@@ -527,11 +530,32 @@ std::vector<std::string> get_statement_texts( pet_scop* scop, SourceLocation slo
   } // loop over all statements
 
   return statement_texts;
-
 }
 
+#if 0
+// TODO think about adding placeholders for iterators
+std::map<std::string,std::string> get_call_texts(pet_scop* pscop, SourceLocation sloc_file, SourceManager& SM ){
+  
+  std::map<std::string,std::string> call_texts;
+  for( auto& element : pscop->name_to_expr ){
+    std::string call_text = Lexer::getSourceText( 
+      CharSourceRange::getTokenRange( element.second->getSourceRange() ),
+      SM, 
+      LangOptions() 
+    );
+    call_texts[element.first] = call_text;
+  }
+  
+}
+#endif
 
-static void create_scop_replacement( ASTContext& ctx_clang, pet_scop* scop, const ForStmt* for_stmt, pluto_codegen_cxx::EMIT_CODE_TYPE emit_code_type, bool write_cloog_file ) {
+static void create_scop_replacement( ASTContext& ctx_clang, 
+    pet_scop* scop, 
+    const ForStmt* for_stmt, 
+    pluto_codegen_cxx::EMIT_CODE_TYPE emit_code_type, 
+    bool write_cloog_file, 
+    std::unique_ptr<std::map<std::string,std::string>>& call_texts 
+  ) {
 
   SourceManager& SM = ctx_clang.getSourceManager();
   DiagnosticsEngine& diag = ctx_clang.getDiagnostics();
@@ -539,10 +563,10 @@ static void create_scop_replacement( ASTContext& ctx_clang, pet_scop* scop, cons
   FileID fid = SM.getFileID( for_stmt->getLocStart() );
   SourceLocation sloc_file = SM.translateLineCol(fid,1,1);
 
-  std::cout << "this decl group contains a scop at:" << std::endl;
+  std::cerr << "this decl group contains a scop at:" << std::endl;
   pet_loc* loc = scop->loc;
-  std::cout << pet_loc_get_start(loc) << " to " << pet_loc_get_end( loc ) << std::endl;
-  std::cout << "at line " << pet_loc_get_line(loc) << std::endl;
+  std::cerr << pet_loc_get_start(loc) << " to " << pet_loc_get_end( loc ) << std::endl;
+  std::cerr << "at line " << pet_loc_get_line(loc) << std::endl;
 
   auto begin_scop = sloc_file.getLocWithOffset( pet_loc_get_start(loc) );
   auto end_scop = sloc_file.getLocWithOffset( pet_loc_get_end(loc) );
@@ -568,17 +592,17 @@ static void create_scop_replacement( ASTContext& ctx_clang, pet_scop* scop, cons
       std::cerr << "done generating pluto program from scop" << std::endl;
     }
 
-    std::cout << "schedule pluto prog" << std::endl;
+    std::cerr << "schedule pluto prog" << std::endl;
     
     // the pluto_function returns a number that indicated how many loops are parallel 
     int parallel_loops = pluto_schedule_pluto( prog, pluto_options );
-    std::cout << "schedule_pluto done " << std::endl;
+    std::cerr << "schedule_pluto done " << std::endl;
   auto end_pluto = std::chrono::high_resolution_clock::now();
   std::chrono::duration<double> diff = end_pluto-begin_pluto;
-  std::cout << "pluto time consumption " << diff.count() << " s" << std::endl;
+  std::cerr << "pluto time consumption " << diff.count() << " s" << std::endl;
 
   if ( parallel_loops <= 0 ) {
-    std::cout << "loop is not parallel" << std::endl;
+    std::cerr << "loop is not parallel" << std::endl;
     // TODO emit diagnostic on why its not parallel
     // TODO run sequential STL algorithm matcher 
     auto begin_analyzer = std::chrono::high_resolution_clock::now();
@@ -587,7 +611,7 @@ static void create_scop_replacement( ASTContext& ctx_clang, pet_scop* scop, cons
     }
     auto end_analyzer = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> diff = end_analyzer-begin_analyzer;
-    std::cout << "analyzer time consumption " << diff.count() << " s" << std::endl;
+    std::cerr << "analyzer time consumption " << diff.count() << " s" << std::endl;
     return;
   }
 
@@ -597,16 +621,16 @@ static void create_scop_replacement( ASTContext& ctx_clang, pet_scop* scop, cons
 
   // find the text of the original statement
   auto statement_texts = get_statement_texts( scop, sloc_file, SM, for_stmt );
-
+  //auto call_texts = get_call_texts( scop , sloc_file, SM, for_stmt );
 
   std::stringstream outfp;
 
-  if ( pluto_codegen_cxx::pluto_multicore_codegen( outfp, prog, statement_texts, emit_code_type, write_cloog_file ) == EXIT_FAILURE ) {
+  if ( pluto_codegen_cxx::pluto_multicore_codegen( outfp, prog, statement_texts, emit_code_type, write_cloog_file, *call_texts ) == EXIT_FAILURE ) {
     // stop if codegeneration failed
     return;
   }
 
-  std::cout << outfp.str() << std::endl;
+  std::cerr << outfp.str() << std::endl;
 
   std::string repl = outfp.str();
 
@@ -626,29 +650,31 @@ static void extract_scop_with_pet( ASTContext& ctx_clang, const ForStmt* for_stm
   DiagnosticsEngine& diag = ctx_clang.getDiagnostics();
   SourceManager& SM = ctx_clang.getSourceManager();
 
-  std::cout << "handling for_stmt " << ctr++ << std::endl;
+  std::cerr << "handling for_stmt " << ctr++ << std::endl;
   Pet pet_scanner( diag, &ctx_clang );
-  std::cout << "done creating the Pet scanner object" << std::endl;
+  std::cerr << "done creating the Pet scanner object" << std::endl;
 
-  std::cout << "LINE" << __LINE__ << std::endl;
-  std::cout << "ast context " << &ctx_clang << " sm " << &SM << std::endl;
-  std::cout << "LINE" << __LINE__ << std::endl;
+  std::cerr << "LINE" << __LINE__ << std::endl;
+  std::cerr << "ast context " << &ctx_clang << " sm " << &SM << std::endl;
+  std::cerr << "LINE" << __LINE__ << std::endl;
 
 
   pet_scop* scop = nullptr;
 
+  std::unique_ptr<std::map<std::string,std::string>> call_texts;
+
   auto begin_pet = std::chrono::high_resolution_clock::now();
-  std::cout << "calling pet_scop_extract_from_clang_ast" << std::endl;
-  pet_scanner.pet_scop_extract_from_clang_ast(&ctx_clang,(ForStmt*)for_stmt, (FunctionDecl*) function_decl ,&scop); 
-  std::cout << "done calling pet_scop_extract_from_clang_ast" << std::endl;
+  std::cerr << "calling pet_scop_extract_from_clang_ast" << std::endl;
+  pet_scanner.pet_scop_extract_from_clang_ast(&ctx_clang,(ForStmt*)for_stmt, (FunctionDecl*) function_decl, call_texts, &scop); 
+  std::cerr << "done calling pet_scop_extract_from_clang_ast" << std::endl;
   auto end_pet = std::chrono::high_resolution_clock::now();
   std::chrono::duration<double> diff = end_pet-begin_pet;
-  std::cout << "pet time consumption " << diff.count() << " s" << std::endl;
+  std::cerr << "pet time consumption " << diff.count() << " s" << std::endl;
 
 
   if ( scop ) {
-    std::cout << "found a valid scop" << std::endl;
-    create_scop_replacement( ctx_clang, scop, for_stmt, emit_code_type, write_cloog_file );
+    std::cerr << "found a valid scop" << std::endl;
+    create_scop_replacement( ctx_clang, scop, for_stmt, emit_code_type, write_cloog_file, call_texts );
   }
 }
 
@@ -662,7 +688,7 @@ class Callback : public MatchFinder::MatchCallback {
     }
      // is the function that is called if the matcher finds something
      virtual void run(const MatchFinder::MatchResult &Result){
-       std::cout << "plugin callback called " << std::endl;
+       std::cerr << "plugin callback called " << std::endl;
        ASTContext& context = *Result.Context;
        SourceManager& SM = context.getSourceManager();
 
@@ -673,7 +699,7 @@ class Callback : public MatchFinder::MatchCallback {
 	     extract_scop_with_pet( context, for_stmt, function_decl, emit_code_type, write_cloog_file );
 	   }
 	   //else{
-	   //  std::cout << "location of for_stmt is not in the main file but in " << SM.getFilename(loc).str() << std::endl;
+	   //  std::cerr << "location of for_stmt is not in the main file but in " << SM.getFilename(loc).str() << std::endl;
 	   //}
 	 }
        }
@@ -693,11 +719,11 @@ public:
     emit_code_type(_emit_code_type),
     write_cloog_file(_write_cloog_file)
   { 
-    std::cout << "for loop consumer created " << this << std::endl;
+    std::cerr << "for loop consumer created " << this << std::endl;
   }
 
   ~ForLoopConsumer(){
-    std::cout << "for loop consumer destroyed " << this << std::endl;
+    std::cerr << "for loop consumer destroyed " << this << std::endl;
   }
 
 
@@ -724,13 +750,13 @@ public:
     ctr = 0;
     MatchFinder Finder;
     Callback Fixer(emit_code_type, write_cloog_file);
-    std::cout << "adding matcher" << std::endl;
+    std::cerr << "adding matcher" << std::endl;
     Finder.addMatcher( makeForLoopMatcher(), &Fixer);
-    std::cout << "running matcher" << std::endl;
+    std::cerr << "running matcher" << std::endl;
     Finder.matchAST(clang_ctx);
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> diff = end-begin;
-    std::cout << "plugin time consumption " << diff.count() << " s" << std::endl;
+    std::cerr << "plugin time consumption " << diff.count() << " s" << std::endl;
   }
 #endif
 
@@ -740,41 +766,55 @@ private:
 
 };
 
-static bool once = true;
+static bool once_std_out = true;
+static bool once_std_err = true;
 
 class ClanAction : public PluginASTAction {
 
   public:
     ClanAction(){
-      if ( once ) {
-	//std::freopen("/home/incubus/log/clan_redir_stdout.log", "a", stdout);
-	//std::freopen("/home/incubus/log/clan_redir_stderr.log", "a", stderr);
-	//setvbuf ( stdout , NULL , _IOLBF , 1024 );
-	//setvbuf ( stderr , NULL , _IOLBF , 1024 );
-	once = false;
-      }
-      std::cout << "clang action " << this << " created " << std::endl;
+      std::cerr << "clang action " << this << " created " << std::endl;
     }
 
     virtual ~ClanAction(){
-      std::cout << "clang action " << this << " destroyed " << std::endl;
+      std::cerr << "clang action " << this << " destroyed " << std::endl;
     }
 
   //std::set<std::string> ParsedTemplates;
 protected:
 
 
-    pluto_codegen_cxx::EMIT_CODE_TYPE emit_code_type = pluto_codegen_cxx::EMIT_ACC;
-    bool write_cloog_file = false;
+  pluto_codegen_cxx::EMIT_CODE_TYPE emit_code_type = pluto_codegen_cxx::EMIT_ACC;
+  bool write_cloog_file = false;
+  std::string redirect_stdout_file = "";
+  std::string redirect_stderr_file = "";
+  std::string* next_arg = nullptr;
 
   // NOTE: stefan this creates the consumer that is given the TU after everything is done
   std::unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance &CI,
                                                  llvm::StringRef) override {
-
-    std::cout << "makeing new Consumer object with compiler instance " << &CI << std::endl;
+    if ( redirect_stdout_file != "" ) {
+      std::cout << "redirect_stdout_file " << redirect_stdout_file << std::endl;
+      // TODO mutex
+      if ( once_std_out ) {
+	std::freopen(redirect_stdout_file.c_str(), "a", stdout);
+	setvbuf ( stdout , NULL , _IOLBF , 1024 );
+	once_std_out = false;
+      }     
+    }
+    if ( redirect_stderr_file != "" ) {
+      std::cout << "redirect_stderr_file " << redirect_stderr_file << std::endl;
+      // TODO mutex
+      if ( once_std_err ) {
+	std::freopen(redirect_stderr_file.c_str(), "a", stderr);
+	setvbuf ( stderr , NULL , _IOLBF , 1024 );
+	once_std_err = false;
+      }     
+    }
+    std::cerr << "makeing new Consumer object with compiler instance " << &CI << std::endl;
     auto ret =  llvm::make_unique<ForLoopConsumer>(emit_code_type, write_cloog_file);
-    std::cout << "at load ci " << ret.get() << " instance " << &CI << " ast context " << &CI.getASTContext() << " sm " << &CI.getSourceManager() << std::endl;
-    std::cout << "done with the new consumer object" << std::endl;
+    std::cerr << "at load ci " << ret.get() << " instance " << &CI << " ast context " << &CI.getASTContext() << " sm " << &CI.getSourceManager() << std::endl;
+    std::cerr << "done with the new consumer object" << std::endl;
     return std::move(ret);
   }
 
@@ -791,24 +831,40 @@ protected:
     for (unsigned i = 0, e = args.size(); i != e; ++i) {
       llvm::errs() << "Clan arg = " << args[i] << "\n";
 
+      if ( next_arg ) {
+	*next_arg = args[i];
+	next_arg = nullptr;
+	continue;
+      }
+
       if ( args[i] == "-emit-openacc" ) {
-	std::cout << "emiting openacc" << std::endl;
+	std::cerr << "emiting openacc" << std::endl;
 	emit_code_type = pluto_codegen_cxx::EMIT_ACC;
       }
 
       if ( args[i] == "-emit-openmp" ) {
-	std::cout << "emiting openmp" << std::endl;
+	std::cerr << "emiting openmp" << std::endl;
 	emit_code_type = pluto_codegen_cxx::EMIT_OPENMP;
       }
 
       if ( args[i] == "-emit-hpx" ) {
-	std::cout << "emiting hpx" << std::endl;
+	std::cerr << "emiting hpx" << std::endl;
 	emit_code_type = pluto_codegen_cxx::EMIT_HPX;
       }
 
       if ( args[i] == "-write-cloog-file" ) {
-	std::cout << "writing cloog file" << std::endl;
+	std::cerr << "writing cloog file" << std::endl;
 	write_cloog_file = true;
+      }
+
+      if ( args[i] == "-redirect-stdout" ) {
+	std::cerr << "redirecting stdout" << std::endl;
+	next_arg = &redirect_stdout_file;
+      }
+
+      if ( args[i] == "-redirect-stderr" ) {
+	std::cerr << "redirecting stderr" << std::endl;
+	next_arg = &redirect_stderr_file;
       }
 
     }
