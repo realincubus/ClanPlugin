@@ -76,6 +76,14 @@ extern "C"{
 }
 
 
+class PetPlutoInterface{
+
+  public:
+
+    PetPlutoInterface( std::set<std::string>& _header_includes ) : header_includes(_header_includes) 
+    {
+    }
+
 struct set_rename_data {
     isl_union_set* new_set;
     std::vector<int>* rename_table;
@@ -227,7 +235,7 @@ void build_rename_table( isl_union_set* domains, std::vector<int>& table ) {
   
 }
 
-static isl_stat correct_alignment( __isl_take isl_map *schedule, void* user ){
+isl_stat correct_alignment( __isl_take isl_map *schedule, void* user ){
   std::pair<pet_scop*,isl_union_map*>* user_data = (std::pair<pet_scop*,isl_union_map*>*)user;
 
   // correcting schedule 
@@ -300,23 +308,6 @@ PlutoProg* compute_deps( pet_scop* pscop, PlutoOptions* options ) {
 	      isl_set** uni = (isl_set**)user_data;
 	      std::cerr << "basic set: "   << std::endl;
 	      isl_basic_set_dump( bset );
-#if 0
-	      if ( *uni == nullptr ) {
-		std::cerr << "setting first basic set" << std::endl;
-		// promote the basic set to a set
-		auto bset_set = isl_set_from_basic_set( bset );
-		*uni = bset_set;
-	      }else{
-		std::cerr << "first set already set -> unionizing" << std::endl;
-		auto bset_set = isl_set_from_basic_set( bset );
-		isl_set* new_bset = isl_set_union( *uni, bset_set );
-		auto n_bset = isl_set_n_basic_set( new_bset );
-		std::cerr << "dumping the union with n basic sets " << n_bset << std::endl;
-		isl_set_dump( new_bset );
-		std::cerr << "done dumping the union" << std::endl;
-
-	      }
-#endif
 	      return (isl_stat)0;
 	    },
 	    &uni
@@ -532,24 +523,7 @@ std::vector<std::string> get_statement_texts( pet_scop* scop, SourceLocation slo
   return statement_texts;
 }
 
-#if 0
-// TODO think about adding placeholders for iterators
-std::map<std::string,std::string> get_call_texts(pet_scop* pscop, SourceLocation sloc_file, SourceManager& SM ){
-  
-  std::map<std::string,std::string> call_texts;
-  for( auto& element : pscop->name_to_expr ){
-    std::string call_text = Lexer::getSourceText( 
-      CharSourceRange::getTokenRange( element.second->getSourceRange() ),
-      SM, 
-      LangOptions() 
-    );
-    call_texts[element.first] = call_text;
-  }
-  
-}
-#endif
-
-static void create_scop_replacement( ASTContext& ctx_clang, 
+void create_scop_replacement( ASTContext& ctx_clang, 
     pet_scop* scop, 
     const ForStmt* for_stmt, 
     pluto_codegen_cxx::EMIT_CODE_TYPE emit_code_type, 
@@ -625,7 +599,7 @@ static void create_scop_replacement( ASTContext& ctx_clang,
 
   std::stringstream outfp;
 
-  if ( pluto_codegen_cxx::pluto_multicore_codegen( outfp, prog, statement_texts, emit_code_type, write_cloog_file, *call_texts ) == EXIT_FAILURE ) {
+  if ( pluto_codegen_cxx::pluto_multicore_codegen( outfp, prog, statement_texts, emit_code_type, write_cloog_file, *call_texts, header_includes ) == EXIT_FAILURE ) {
     // stop if codegeneration failed
     return;
   }
@@ -645,7 +619,7 @@ static void create_scop_replacement( ASTContext& ctx_clang,
 }
 
 
-static void extract_scop_with_pet( ASTContext& ctx_clang, const ForStmt* for_stmt, const FunctionDecl* function_decl, pluto_codegen_cxx::EMIT_CODE_TYPE emit_code_type, bool write_cloog_file ) {
+void extract_scop_with_pet( ASTContext& ctx_clang, const ForStmt* for_stmt, const FunctionDecl* function_decl, pluto_codegen_cxx::EMIT_CODE_TYPE emit_code_type, bool write_cloog_file ) {
   
   DiagnosticsEngine& diag = ctx_clang.getDiagnostics();
   SourceManager& SM = ctx_clang.getSourceManager();
@@ -678,6 +652,12 @@ static void extract_scop_with_pet( ASTContext& ctx_clang, const ForStmt* for_stm
   }
 }
 
+protected:
+
+  std::set<std::string>& header_includes;
+
+}; // PetPlutoInterface
+
 class Callback : public MatchFinder::MatchCallback {
   public:
     Callback ( pluto_codegen_cxx::EMIT_CODE_TYPE _emit_code_type, bool _write_cloog_file ) :
@@ -696,15 +676,15 @@ class Callback : public MatchFinder::MatchCallback {
 	 if ( auto* for_stmt = Result.Nodes.getNodeAs<ForStmt>("for_stmt") ) {
 	   auto loc = for_stmt->getLocStart();
 	   if ( SM.isInMainFile( loc ) ) {
-	     extract_scop_with_pet( context, for_stmt, function_decl, emit_code_type, write_cloog_file );
+	     PetPlutoInterface ppi(header_includes);
+	     ppi.extract_scop_with_pet( context, for_stmt, function_decl, emit_code_type, write_cloog_file );
 	   }
-	   //else{
-	   //  std::cerr << "location of for_stmt is not in the main file but in " << SM.getFilename(loc).str() << std::endl;
-	   //}
 	 }
        }
 
      }
+
+  std::set<std::string> header_includes;
 
   private:
      pluto_codegen_cxx::EMIT_CODE_TYPE emit_code_type;
@@ -747,16 +727,36 @@ public:
 #if 1
   void HandleTranslationUnit( ASTContext& clang_ctx ) {
     auto begin = std::chrono::high_resolution_clock::now();
-    ctr = 0;
     MatchFinder Finder;
     Callback Fixer(emit_code_type, write_cloog_file);
     std::cerr << "adding matcher" << std::endl;
     Finder.addMatcher( makeForLoopMatcher(), &Fixer);
     std::cerr << "running matcher" << std::endl;
     Finder.matchAST(clang_ctx);
+
+    add_missing_includes(Fixer, clang_ctx);
+
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> diff = end-begin;
     std::cerr << "plugin time consumption " << diff.count() << " s" << std::endl;
+  }
+
+  void add_missing_includes(Callback& Fixer, ASTContext& clang_ctx) {
+    for( auto& header : Fixer.header_includes ){
+      // TODO dont add if the header is already included
+      // TODO skip the lines that begin with a comment 
+      //      this way its possible to skip licences that are mostly at the beginning of a file
+      auto& SM = clang_ctx.getSourceManager();
+      auto fid = SM.getMainFileID();
+      auto line = 1;
+      auto col = 1;
+      auto name = header;
+      auto begin_of_file = SM.translateLineCol( fid, line, col );
+      auto& diag = clang_ctx.getDiagnostics();
+      unsigned id = diag.getCustomDiagID(DiagnosticsEngine::Warning, "missing header for hpx");
+
+      diag.Report(begin_of_file, id)  << FixItHint::CreateInsertion(begin_of_file, std::string("#include <") + name + ">\n" );
+    }
   }
 #endif
 
@@ -851,6 +851,18 @@ protected:
 	std::cerr << "emiting hpx" << std::endl;
 	emit_code_type = pluto_codegen_cxx::EMIT_HPX;
       }
+
+      if ( args[i] == "-emit-tbb" ) {
+	std::cerr << "emiting tbb" << std::endl;
+	emit_code_type = pluto_codegen_cxx::EMIT_TBB;
+      }
+
+      if ( args[i] == "-emit-cilk" ) {
+	std::cerr << "emiting cilk" << std::endl;
+	emit_code_type = pluto_codegen_cxx::EMIT_CILK;
+      }
+
+      // add new back-ends here 
 
       if ( args[i] == "-write-cloog-file" ) {
 	std::cerr << "writing cloog file" << std::endl;
