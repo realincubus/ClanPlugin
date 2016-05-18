@@ -50,6 +50,9 @@
 #include "pet.h"
 #include "pet_cxx.h"
 
+#include "dependency_analysis.h"
+#include "pluto_compat.h"
+
 extern "C"{
 // TODO this has to go into the libpluto header
 int pluto_schedule_pluto( PlutoProg* prog, PlutoOptions* options );
@@ -71,7 +74,11 @@ extern "C"{
       isl_union_map* empty, 
       isl_union_set* domain,
       isl_set* context,
-      PlutoOptions* options 
+      PlutoOptions* options,
+      isl_union_map* raw,
+      isl_union_map* war,
+      isl_union_map* waw,
+      isl_union_map* red
   );
 }
 
@@ -84,98 +91,13 @@ class PetPlutoInterface{
     {
     }
 
-struct set_rename_data {
-    isl_union_set* new_set;
-    std::vector<int>* rename_table;
-};
-
-struct map_rename_data {
-    isl_union_map* new_map;
-    std::vector<int>* rename_table;
-};
-
-
-// let the domain names be in accending order without gaps
-isl_union_set* linearize_domains( pet_scop* pscop, isl_union_set* domains, std::vector<int>& rename_table ) {
-  set_rename_data user_data;
-  // start with 0 
-  isl_union_set* new_domain = isl_union_set_empty( isl_set_get_space(pscop->context) );
-
-  user_data.new_set = new_domain; 
-  user_data.rename_table = &rename_table;
-
-  isl_union_set_foreach_set(domains, 
-      []( __isl_take isl_set* set, void* user ){
-	  set_rename_data* user_data = (set_rename_data*)(user);
-
-	  const char *name = isl_set_get_tuple_name(set);
-	  char *new_name = (char*)malloc(sizeof(const char) * 10 );
-
-	  // extract name and change it with the rename table
-	  assert(isdigit(name[2]));
-	  int id = atoi(&name[2]);
-
-	  sprintf( new_name, "S_%d", (*user_data->rename_table)[id] );
-
-	  std::cerr << "renaming from " << name << " to " << new_name << std::endl;    
-
-	  auto new_isl_set = isl_set_set_tuple_name(set, new_name );
-	  isl_set_dump( new_isl_set );
-	  const char *set_name = isl_set_get_tuple_name(new_isl_set);
-	  std::cerr << "done renaming new name is " << set_name << std::endl;    
-
-	  isl_union_set_add_set( user_data->new_set, new_isl_set );
-
-	  return (isl_stat)0;    
-      }, 
-      &user_data
-  );
-  return new_domain;
-}
-
-isl_union_map* linearize_union_map( pet_scop* pscop, isl_union_map* schedule, std::vector<int>& rename_table){
-  map_rename_data user_data;
-  isl_union_map* new_map = isl_union_map_empty( isl_set_get_space(pscop->context) );
-  user_data.new_map = new_map; 
-  user_data.rename_table = &rename_table;
-
-  isl_union_map_foreach_map(schedule, 
-      []( __isl_take isl_map* map, void* user ) {
-	map_rename_data* user_data = (map_rename_data*)(user);
-
-	isl_dim_type t = isl_dim_in;
-	const char *name = isl_map_get_tuple_name(map,t);
-	char *new_name = (char*)malloc(sizeof(const char) * 10 );
-
-	assert(isdigit(name[2]));
-	int id = atoi(&name[2]);
-
-	sprintf( new_name, "S_%d", (*user_data->rename_table)[id] );
-	std::cerr << "renaming from " <<  name << " to " << new_name << std::endl;    
-	
-	isl_map_dump( map );
-	auto new_isl_map = isl_map_set_tuple_name(map,t, new_name );
-	isl_map_dump( new_isl_map );
-	const char *set_name = isl_map_get_tuple_name(new_isl_map, t );
-	std::cerr << "done renaming" << std::endl;    
-
-	isl_union_map_add_map( user_data->new_map, new_isl_map );
-
-	return (isl_stat)0;    
-      }, 
-      &user_data
-  ); 
-
-  return new_map;
-}
-
 void build_rename_table( isl_union_set* domains, std::vector<int>& table ) {
   
   // get the highest number
   int max_id = -1;
   isl_union_set_foreach_set(domains, 
       []( __isl_take isl_set* set, void* user ){
-	printf("Line %d %s\n",__LINE__,__FILE__);
+	std::cerr << "Line " << __LINE__ << " " << __FILE__ << std::endl;
 	int* max_id = (int*) user;
 
 	/* A statement's domain (isl_set) should be named S_%d */
@@ -194,6 +116,7 @@ void build_rename_table( isl_union_set* domains, std::vector<int>& table ) {
   // for half open range usage
   max_id++;
 
+  std::cerr << "plugin: max id " << max_id << std::endl;
   table.resize(max_id);
   int new_id = 0;
   std::fill( begin(table), end(table), -1 );
@@ -201,6 +124,7 @@ void build_rename_table( isl_union_set* domains, std::vector<int>& table ) {
   // i cannot assume that the domains are in order so i have to search through the list
   for (int i = 0; i < max_id; ++i){
     std::pair<int,int> find_id = std::make_pair( i, -1 );
+    std::cerr << "plugin: who has " << i << std::endl;
     isl_union_set_foreach_set(domains, 
 	[]( __isl_take isl_set* set, void* user ){
 
@@ -209,7 +133,11 @@ void build_rename_table( isl_union_set* domains, std::vector<int>& table ) {
 	  const char *name = isl_set_get_tuple_name(set);
 	  assert(isdigit(name[2]));
 	  int id = atoi(&name[2]);
+
+	  std::cerr << "plugin: this is " << id << std::endl;
+
 	  if ( find_id->first == id ) {
+	    std::cerr << "plugin: found id " << id << " at pos " << find_id->first << std::endl;
 	    find_id->second = id;
 	    return (isl_stat)1;
 	  }
@@ -244,24 +172,60 @@ isl_stat correct_alignment( __isl_take isl_map *schedule, void* user ){
   return (isl_stat)0;
 }
 
+__isl_give isl_union_set *collect_non_kill_domains(struct pet_scop *scop )
+{
+        int i;
+        isl_set *domain_i;
+        isl_union_set *domain;
+
+        if (!scop)
+                return NULL;
+
+        domain = isl_union_set_empty(isl_set_get_space(scop->context));
+
+        for (i = 0; i < scop->n_stmt; ++i) {
+                struct pet_stmt *stmt = scop->stmts[i];
+
+                if (pet_stmt_is_kill( stmt ) )
+                        continue;
+
+                if (stmt->n_arg > 0) 
+                        isl_die(isl_union_set_get_ctx(domain),
+                                isl_error_unsupported,
+                                "data dependent conditions not supported",
+                                return isl_union_set_free(domain));
+
+                domain_i = isl_set_copy(scop->stmts[i]->domain);
+                domain = isl_union_set_add_set(domain, domain_i);
+        }
+
+        return domain;
+}
+
 #if 1
 PlutoProg* compute_deps( pet_scop* pscop, PlutoOptions* options ) {
 
+  // pet injects kill statements into every map 
+  // i need to filter all of these things out in order to make it run like expected
   isl_union_map* schedule= isl_schedule_get_map(pscop->schedule);
   isl_union_map* read = pet_scop_collect_may_reads(pscop);
   isl_union_map* write = pet_scop_collect_must_writes(pscop);
   isl_union_map* empty = isl_union_map_empty(isl_set_get_space(pscop->context));
-  isl_union_set* domains = pet_scop_collect_domains( pscop );
+
+  isl_union_set* domains = collect_non_kill_domains( pscop );
 
   std::vector<int> rename_table;
   build_rename_table( domains, rename_table );
 
+  auto space = isl_set_get_space( pscop->context );
+
+  // filter all that is -1 or not in the table 
   if ( rename_table.size() > 0 ) {
-    domains = linearize_domains( pscop, domains, rename_table );
-    schedule = linearize_union_map( pscop, schedule, rename_table );
-    read = linearize_union_map( pscop, read, rename_table );
-    write = linearize_union_map( pscop, write, rename_table );
-    empty = linearize_union_map( pscop, empty, rename_table );
+    domains = linearize_union_set( space, domains, rename_table );
+    schedule = linearize_union_map( space, schedule, rename_table );
+    read = linearize_union_map( space, read, rename_table );
+    write = linearize_union_map( space, write, rename_table );
+    empty = linearize_union_map( space, empty, rename_table );
   }
 
   isl_set* context = pscop->context;
@@ -282,6 +246,9 @@ PlutoProg* compute_deps( pet_scop* pscop, PlutoOptions* options ) {
   // TODO pluto complains about non unified basic sets in the domains
   //      to overcome this i will simply unify them in isl before passing them to pluto
   
+  // TODO not sure that this is still needed i changed pluto to allow non unified sets to work aswell
+  //      so this might not change anything at all
+
   // loop over all domains 
   isl_union_set_foreach_set( domains, 
       []( __isl_take isl_set* set, void* user_data ) {
@@ -319,7 +286,20 @@ PlutoProg* compute_deps( pet_scop* pscop, PlutoOptions* options ) {
       nullptr
   );
 
-  return pluto_compute_deps( schedule, read, write, empty, domains, context, options );
+
+  //Dependences dependences( pscop );
+  Dependences dependences( pscop );
+
+  dependences.make_pluto_compatible( rename_table );
+
+  // TODO the kill statements are not respected in isls dependency analysis 
+  //      this needs to be taken into account in order to make scoped variables work like expected
+  return pluto_compute_deps( schedule, read, write, empty, dependences.getDomains(), context, options, 
+      dependences.getRAW(),  
+      dependences.getWAR(),  
+      dependences.getWAW(),  
+      dependences.getRED() 
+      );
 }
 #endif
 
@@ -598,6 +578,7 @@ void create_scop_replacement( ASTContext& ctx_clang,
   //auto call_texts = get_call_texts( scop , sloc_file, SM, for_stmt );
 
   std::stringstream outfp;
+  auto begin_codegen = std::chrono::high_resolution_clock::now();
 
   if ( pluto_codegen_cxx::pluto_multicore_codegen( outfp, prog, statement_texts, emit_code_type, write_cloog_file, *call_texts, header_includes ) == EXIT_FAILURE ) {
     // stop if codegeneration failed
@@ -616,6 +597,10 @@ void create_scop_replacement( ASTContext& ctx_clang,
   diag.Report(begin_scop, DiagID) 
   << FixItHint::CreateReplacement(for_stmt->getSourceRange(), repl.c_str() );
   std::cerr << "reported error " << DiagID << std::endl;
+
+  auto end_codegen = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double> diff_cg = end_codegen-begin_codegen;
+  std::cerr << "codegen time consumption " << diff_cg.count() << " s" << std::endl;
 }
 
 
@@ -640,10 +625,12 @@ void extract_scop_with_pet( ASTContext& ctx_clang, const ForStmt* for_stmt, cons
   auto begin_pet = std::chrono::high_resolution_clock::now();
   std::cerr << "calling pet_scop_extract_from_clang_ast" << std::endl;
   pet_scanner.pet_scop_extract_from_clang_ast(&ctx_clang,(ForStmt*)for_stmt, (FunctionDecl*) function_decl, call_texts, &scop); 
+
   std::cerr << "done calling pet_scop_extract_from_clang_ast" << std::endl;
   auto end_pet = std::chrono::high_resolution_clock::now();
   std::chrono::duration<double> diff = end_pet-begin_pet;
   std::cerr << "pet time consumption " << diff.count() << " s" << std::endl;
+
 
 
   if ( scop ) {
@@ -668,7 +655,7 @@ class Callback : public MatchFinder::MatchCallback {
     }
      // is the function that is called if the matcher finds something
      virtual void run(const MatchFinder::MatchResult &Result){
-       std::cerr << "plugin callback called " << std::endl;
+       std::cerr << "plugin: callback called " << std::endl;
        ASTContext& context = *Result.Context;
        SourceManager& SM = context.getSourceManager();
 
@@ -738,7 +725,7 @@ public:
 
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> diff = end-begin;
-    std::cerr << "plugin time consumption " << diff.count() << " s" << std::endl;
+    std::cerr << "plugin: time consumption " << diff.count() << " s" << std::endl;
   }
 
   void add_missing_includes(Callback& Fixer, ASTContext& clang_ctx) {
