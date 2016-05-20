@@ -11,7 +11,6 @@
 #include <isl/ctx.h>
 #include <iostream>
 #include <llvm/ADT/DenseMap.h>
-#include "pluto_compat.h"
 
 // a statement has multiple memory accesses
 
@@ -22,33 +21,20 @@ public:
     expr(_expr)
   {
       std::cerr << "dep analysis: new access " << std::endl;
-      is_read = pet_expr_access_is_read( expr );
-      is_write = pet_expr_access_is_write( expr );
-      if ( is_read && is_write ) {
-	std::cerr << "dep ana: can not handle this right now" << std::endl;
-	exit(-1);
-      }
-      if ( is_read ) {
-	access_relation = isl_map_from_union_map(pet_expr_access_get_may_read( expr ));
-      }
-      if ( is_write ) {
-	access_relation = isl_map_from_union_map(pet_expr_access_get_may_write( expr ));
-      }
   }
   virtual ~MemoryAccess () {}
 
   bool isReductionLike() {
     // TODO implement by calling pet_ functions
     //      right now simply return false since we have no idea
-    return false;
+    return pet_expr_access_is_reduction( expr );
+    //return false;
   }
 
   // TODO needs to return isl_map not union map -> this means that the access relations 
   //      return by the functions have to containe only one element
   // TODO continue here call the is_* functions and return the result otherwise its just an empty set
-  isl_map* getAccessRelation(){
-    return access_relation;
-  }
+  isl_map* getAccessRelation();
 
   // TODO is something that returns A of A[i+1]
   // Needs to handle accesses to arrays,values ...
@@ -57,11 +43,19 @@ public:
   }
 
   bool isRead(){
-    return is_read;
+    return pet_expr_access_is_read( expr );
   }
   
   bool isWrite(){
-    return is_write;
+    return pet_expr_access_is_write( expr );
+  }
+
+  bool isMayWrite(){
+
+  }
+
+  bool isMustWrite(){
+
   }
 
   isl_id* getId(){
@@ -72,20 +66,9 @@ public:
     return pet_expr_access_get_ref_id( expr );
   }
 
-  void filter ( std::vector<int>& filter ){
-    rename_map( access_relation, filter ); 
-  }
-
 private:
-
-  bool is_read = false;
-  bool is_write = false;
-  //bool is_array = false;
-  isl_id* id = nullptr;
-
-  isl_map* access_relation = nullptr;
-
-  pet_expr* expr;
+  
+  pet_expr* expr = nullptr;  
 
 };
 
@@ -97,21 +80,28 @@ static int helper(__isl_keep pet_expr* expr, void* user ){
 
 class ScopStmt {
 public:
-    ScopStmt (pet_stmt* stmt, isl_union_map* _schedule) :
+    ScopStmt (pet_stmt* _s, isl_union_map* _schedule) :
+      stmt(_s),
       schedule( _schedule )
     {
       std::cerr << "dep analysis: new stmt with " << " x accesses " << std::endl;
       pet_tree_foreach_access_expr( 
-	  stmt->body, &helper, &memory_accesses
+	  stmt->body, &helper 
+	  /*
+	  [&]( __isl_keep pet_expr* expr, void* user ) {
+	    memory_accesses.emplace_back( expr );
+	    return (int)0;
+	  }
+	  */
+	  ,
+	  &memory_accesses
       );
       
-      domain = isl_set_copy( stmt->domain );
-      space = isl_set_get_space(stmt->domain);
     }
     virtual ~ScopStmt () {}
 
     isl_set* getDomain(){
-      return domain;    
+      return isl_set_copy(stmt->domain);    
     }
 
     auto begin(){
@@ -123,7 +113,7 @@ public:
     }
 
     auto getDomainSpace() const {
-      return space;
+      return isl_set_get_space(stmt->domain);
     }
 
     // from ScopInfo.cpp
@@ -151,17 +141,9 @@ public:
 
     }
 
-    void filter ( std::vector<int>& filter ) {
-      rename_set( domain, filter );
-      for( auto& access : *this ){
-        access.filter( filter );
-      }
-    }
-
 private:
 
-  isl_set* domain = nullptr;
-  isl_space* space = nullptr;
+  pet_stmt* stmt = nullptr;  
   isl_union_map* schedule = nullptr;
   std::vector<MemoryAccess> memory_accesses;
     
@@ -172,31 +154,22 @@ public:
 
 
     auto getSchedule(){
-      return schedule;
+      return scop->schedule;
     }
 
-    auto getScheduleMap(){
-      return schedule_map;
-    }
-
-    // pet scop must just be used for construction and not be kept 
-    // otherwise the filter operations will not work like expected
-    Scop (pet_scop* scop)
+    Scop (pet_scop* _s) :
+      scop(_s)
     {
-      schedule = isl_schedule_copy(scop->schedule);
-      schedule_map = isl_schedule_get_map(schedule);
       std::cerr << "dep analysis: new scop with " << scop->n_stmt << " statements " << std::endl;
       for (int i = 0; i < scop->n_stmt; ++i){
-        scop_stmts.emplace_back( scop->stmts[i], getScheduleMap() );
+        scop_stmts.emplace_back( scop->stmts[i], isl_schedule_get_map(getSchedule()) );
       }
-
-      space = isl_set_get_space(scop->context);
     }
     virtual ~Scop () {}
 
 
     isl_space* getParamSpace() {
-      return space;
+      return isl_set_get_space(scop->context);
     }
 
     auto begin(){
@@ -206,6 +179,17 @@ public:
     auto end(){
       return scop_stmts.end();
     }
+
+    auto getContext(){
+      return scop->context;
+    }
+
+#if 0
+    // this will collect kill statements and domains that are not in use
+    auto getDomains() {
+      return pet_scop_collect_domains(scop);
+    }
+#endif
 
     auto getDomains() {
       isl_union_set *Domain = isl_union_set_empty(getParamSpace());
@@ -221,18 +205,32 @@ public:
       return isl_schedule_intersect_domain(isl_schedule_copy(getSchedule()), getDomains());
     }
 
-    auto filter ( std::vector<int>& filter ){
-      linearize_union_map ( space, schedule_map, filter );
-      for( auto& stmt : *this ){
-        stmt.filter( filter );
-      }
-    }
-
+    __isl_give isl_union_map* getAccessesOfType(std::function<bool(MemoryAccess &)> Predicate);
+    __isl_give isl_union_map* getMustWrites();
+    __isl_give isl_union_map* getMayWrites();
+    __isl_give isl_union_map* getWrites();
+    __isl_give isl_union_map* getReads();
+    __isl_give isl_union_map* getAccesses();
 private:
-    isl_space* space = nullptr;
-    isl_union_map* schedule_map = nullptr;
-    isl_schedule* schedule = nullptr;
+
+
+    pet_scop* scop;
     std::vector<ScopStmt> scop_stmts;
+};
+
+/// @brief for pluto compatibility
+struct PlutoCompatData{
+    isl_union_map* schedule = nullptr;
+    isl_union_map* reads = nullptr;
+    isl_union_map* writes = nullptr;
+    isl_union_map* empty  = nullptr;
+    isl_union_set* domains = nullptr;
+    isl_set* context = nullptr;
+
+    isl_union_map* raw = nullptr;
+    isl_union_map* war = nullptr;
+    isl_union_map* waw = nullptr;
+    isl_union_map* red = nullptr;
 };
 
 class Dependences {
@@ -266,7 +264,6 @@ public:
     {
       IslCtx = getContext( pscop ) ;
 
-      //collectInfo( scop, &reads, &writes, &may_writes, &access_schedule, &stmt_schedule, Level );
       calculateDependences( scop );
     }
     virtual ~Dependences () {}
@@ -279,9 +276,7 @@ public:
     auto getRED() { return RED; };
     auto getDomains() { return scop.getDomains() ; }
 
-    void make_pluto_compatible( std::vector<int>& filter ) {
-      scop.filter( filter );
-    }
+    PlutoCompatData make_pluto_compatible( std::vector<int>& rename_table );
 
 private:
 
@@ -296,27 +291,23 @@ private:
     void setReductionDependences(MemoryAccess *MA, isl_map *D);
 
 
-    bool UseReductions = true;
+    bool UseReductions = false;
 
     pet_scop* pscop = nullptr;
-    isl_union_map* reads;
-    isl_union_map* writes;
-    isl_union_map* may_writes;
-    isl_union_map* access_schedule;
-    isl_union_map* stmt_schedule;
     Dependences::AnalyisLevel Level = AL_Statement;
     isl_ctx* IslCtx;
 
+
     /// @brief The different basic kinds of dependences we calculate.
-    isl_union_map *RAW;
-    isl_union_map *WAR;
-    isl_union_map *WAW;
+    isl_union_map *RAW = nullptr;
+    isl_union_map *WAR = nullptr;
+    isl_union_map *WAW = nullptr;
 
     /// @brief The special reduction dependences.
-    isl_union_map *RED;
+    isl_union_map *RED = nullptr;
 
     /// @brief The (reverse) transitive closure of reduction dependences.
-    isl_union_map *TC_RED;
+    isl_union_map *TC_RED = nullptr;
 
     // "Bound the dependence analysis by a maximal amount of "
     // "computational steps (0 means no bound)"

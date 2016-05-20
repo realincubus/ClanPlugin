@@ -290,16 +290,33 @@ PlutoProg* compute_deps( pet_scop* pscop, PlutoOptions* options ) {
   //Dependences dependences( pscop );
   Dependences dependences( pscop );
 
-  dependences.make_pluto_compatible( rename_table );
+  auto pluto_compat_data = dependences.make_pluto_compatible( rename_table );
 
   // TODO the kill statements are not respected in isls dependency analysis 
   //      this needs to be taken into account in order to make scoped variables work like expected
-  return pluto_compute_deps( schedule, read, write, empty, dependences.getDomains(), context, options, 
+#if 0
+  return pluto_compute_deps( schedule, read, write, empty, domains, context, options, 
       dependences.getRAW(),  
       dependences.getWAR(),  
       dependences.getWAW(),  
       dependences.getRED() 
       );
+#endif
+#if 1
+  return pluto_compute_deps( 
+      pluto_compat_data.schedule, 
+      pluto_compat_data.reads, 
+      pluto_compat_data.writes, 
+      pluto_compat_data.empty, 
+      pluto_compat_data.domains, 
+      pluto_compat_data.context, 
+      options, 
+      pluto_compat_data.raw,  
+      pluto_compat_data.war,  
+      pluto_compat_data.waw,  
+      pluto_compat_data.red 
+      );
+#endif
 }
 #endif
 

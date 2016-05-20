@@ -1,6 +1,7 @@
 
 
 #include "dependency_analysis.h"
+#include "pluto_compat.h"
 
 #include <iostream>
 
@@ -8,6 +9,15 @@
 
 // TODO i guess i also need to implement a MemoryAccess class otherwise this will get very complicated
 
+isl_map* MemoryAccess::getAccessRelation(){
+  if ( pet_expr_access_is_read( expr ) ) {
+    return isl_map_from_union_map(pet_expr_access_get_may_read( expr ));
+  }
+  if ( pet_expr_access_is_write( expr ) ) {
+    return isl_map_from_union_map(pet_expr_access_get_may_write( expr ));
+  }
+  return (isl_map*)nullptr;
+}
 
 /// @brief Tag the @p Relation domain with @p TagId
 static __isl_give isl_map *tag(__isl_take isl_map *Relation,
@@ -107,10 +117,16 @@ Dependences::collectInfo(Scop &S, isl_union_map **Read, isl_union_map **Write,
 #if 0
       }
 #endif
-      if (MA.isRead())
-        *Read = isl_union_map_add_map(*Read, accdom);
-      else
-        *Write = isl_union_map_add_map(*Write, accdom);
+      // in contrast to llvm is nodes something from clang AST can be both  
+      if (MA.isRead()){
+        *Read = isl_union_map_add_map(*Read, isl_map_copy(accdom));
+      }
+      
+      if (MA.isWrite()){
+        *Write = isl_union_map_add_map(*Write, isl_map_copy(accdom));
+      }
+
+      // TODO i think i need to delete the accdom now
     }
 
     if (Level == Dependences::AL_Statement)
@@ -578,3 +594,84 @@ void Dependences::setReductionDependences(MemoryAccess *MA, isl_map *D) {
          "Reduction dependences set twice!");
   ReductionDependences[MA] = D;
 }
+
+PlutoCompatData Dependences::make_pluto_compatible( std::vector<int>& rename_table ) {
+  PlutoCompatData pcd;
+
+  std::cerr << "dep ana: creating compat data" << std::endl;
+
+  isl_space* space = scop.getParamSpace();
+
+  pcd.schedule = isl_schedule_get_map( scop.getSchedule() );
+  std::cerr << "dep ana: reads" << std::endl;
+  pcd.reads = scop.getReads();
+  std::cerr << "dep ana: writes" << std::endl;
+  pcd.writes = scop.getWrites();
+
+  pcd.context = isl_set_copy(scop.getContext());
+  pcd.empty = isl_union_map_empty(space);
+
+  std::cerr << "dep ana: domains" << std::endl;
+  pcd.domains = scop.getDomains();
+
+  pcd.raw = isl_union_map_copy(RAW);
+  pcd.war = isl_union_map_copy(WAR);
+  pcd.waw = isl_union_map_copy(WAW);
+  pcd.red = isl_union_map_copy(RED);
+
+  std::cerr << "writes before rename" << std::endl;
+  isl_union_map_dump(pcd.writes);
+  if ( rename_table.size() > 0 ) {
+    pcd.schedule = linearize_union_map( space, pcd.schedule, rename_table );
+    pcd.reads = linearize_union_map( space, pcd.reads, rename_table );
+    pcd.writes = linearize_union_map( space, pcd.writes, rename_table );
+    pcd.domains = linearize_union_set( space, pcd.domains, rename_table );
+    pcd.raw = linearize_union_map( space, pcd.raw, rename_table );
+    pcd.war = linearize_union_map( space, pcd.war, rename_table );
+    pcd.waw = linearize_union_map( space, pcd.waw, rename_table );
+    pcd.red = linearize_union_map( space, pcd.red, rename_table );
+  }
+  std::cerr << "writes after rename" << std::endl;
+  isl_union_map_dump(pcd.writes);
+
+  return pcd;
+}
+
+__isl_give isl_union_map *
+Scop::getAccessesOfType(std::function<bool(MemoryAccess &)> Predicate) {
+  isl_union_map *Accesses = isl_union_map_empty(getParamSpace());
+
+  for (ScopStmt &Stmt : *this) {
+    for (MemoryAccess& MA : Stmt) {
+      if (!Predicate(MA))
+        continue;
+
+      isl_set *Domain = Stmt.getDomain();
+      isl_map *AccessDomain = MA.getAccessRelation();
+      AccessDomain = isl_map_intersect_domain(AccessDomain, Domain);
+      Accesses = isl_union_map_add_map(Accesses, AccessDomain);
+    }    
+  }
+  return isl_union_map_coalesce(Accesses);
+}
+
+__isl_give isl_union_map *Scop::getMustWrites() {
+  return getAccessesOfType([](MemoryAccess &MA) { return MA.isMustWrite(); });
+}
+
+__isl_give isl_union_map *Scop::getMayWrites() {
+  return getAccessesOfType([](MemoryAccess &MA) { return MA.isMayWrite(); });
+}
+
+__isl_give isl_union_map *Scop::getWrites() {
+  return getAccessesOfType([](MemoryAccess &MA) { return MA.isWrite(); });
+}
+
+__isl_give isl_union_map *Scop::getReads() {
+  return getAccessesOfType([](MemoryAccess &MA) { return MA.isRead(); });
+}
+
+__isl_give isl_union_map *Scop::getAccesses() {
+  return getAccessesOfType([](MemoryAccess &MA) { return true; });
+}
+
