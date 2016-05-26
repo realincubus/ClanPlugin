@@ -59,22 +59,20 @@ Dependences::collectInfo(Scop &S, isl_union_map **Read, isl_union_map **Write,
   *Write = isl_union_map_empty(isl_space_copy(Space));
   *MayWrite = isl_union_map_empty(isl_space_copy(Space));
   *AccessSchedule = isl_union_map_empty(isl_space_copy(Space));
-  *StmtSchedule = isl_union_map_empty(Space);
+  *StmtSchedule = isl_union_map_empty(isl_space_copy(Space));
 
-#if 0
-  // TODO i dont know what Value is 
-  SmallPtrSet<const Value *, 8> ReductionBaseValues;
+#if 1
+  std::set<const isl_id *> ReductionBaseValues;
   if (UseReductions)
     for (ScopStmt &Stmt : S)
-      for (MemoryAccess *MA : Stmt)
-        if (MA->isReductionLike())
-          ReductionBaseValues.insert(MA->getBaseAddr());
+      for (MemoryAccess& MA : Stmt)
+        if (MA.isReductionLike())
+          ReductionBaseValues.insert(MA.getBaseAddr());
 #endif
 
   for (ScopStmt &Stmt : S) {
     for (MemoryAccess& MA : Stmt) {
       isl_set *domcp = Stmt.getDomain();
-      //isl_map *accdom = MA.getAccessRelation();
       isl_map *accdom = MA.getAccessRelation();
       std::cerr << "dep anaylsis: dumping isl_union_map of accdom"  << std::endl;
       if ( !accdom ) {
@@ -86,8 +84,8 @@ Dependences::collectInfo(Scop &S, isl_union_map **Read, isl_union_map **Write,
       std::cerr << "after intersect with domain" << std::endl;
       isl_map_dump( accdom );
 
-#if 0
-      if (ReductionBaseValues.count(MA->getBaseAddr())) {
+#if 1
+      if (ReductionBaseValues.count(MA.getBaseAddr())) {
         // Wrap the access domain and adjust the schedule accordingly.
         //
         // An access domain like
@@ -114,7 +112,7 @@ Dependences::collectInfo(Scop &S, isl_union_map **Read, isl_union_map **Write,
           isl_map *Schedule = tag(Stmt.getSchedule(), &MA, Level);
           *StmtSchedule = isl_union_map_add_map(*StmtSchedule, Schedule);
         }
-#if 0
+#if 1
       }
 #endif
       // in contrast to llvm is nodes something from clang AST can be both  
@@ -129,8 +127,10 @@ Dependences::collectInfo(Scop &S, isl_union_map **Read, isl_union_map **Write,
       // TODO i think i need to delete the accdom now
     }
 
-    if (Level == Dependences::AL_Statement)
+    if (Level == Dependences::AL_Statement){
       *StmtSchedule = isl_union_map_add_map(*StmtSchedule, Stmt.getSchedule());
+    }
+    std::cerr << "done " << __PRETTY_FUNCTION__ << std::endl;
   }
 
   // TODO i have no idea what this is about

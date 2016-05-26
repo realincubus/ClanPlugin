@@ -36,10 +36,8 @@ public:
   // TODO continue here call the is_* functions and return the result otherwise its just an empty set
   isl_map* getAccessRelation();
 
-  // TODO is something that returns A of A[i+1]
-  // Needs to handle accesses to arrays,values ...
   auto getBaseAddr() {
-    
+    return pet_expr_access_get_ref_id( expr );
   }
 
   bool isRead(){
@@ -124,7 +122,7 @@ public:
 	return isl_map_from_aff(
 	    isl_aff_zero_on_domain(isl_local_space_from_space(getDomainSpace())));
       }
-      auto *Schedule = schedule;
+      auto *Schedule = isl_union_map_copy(schedule);
       Schedule = isl_union_map_intersect_domain(
 	  Schedule, isl_union_set_from_set(isl_set_copy(Domain)));
       if (isl_union_map_is_empty(Schedule)) {
@@ -291,7 +289,7 @@ private:
     void setReductionDependences(MemoryAccess *MA, isl_map *D);
 
 
-    bool UseReductions = false;
+    bool UseReductions = true;
 
     pet_scop* pscop = nullptr;
     Dependences::AnalyisLevel Level = AL_Statement;
