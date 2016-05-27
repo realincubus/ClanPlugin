@@ -37,7 +37,8 @@ public:
   isl_map* getAccessRelation();
 
   auto getBaseAddr() {
-    return pet_expr_access_get_ref_id( expr );
+    //return pet_expr_access_get_ref_id( expr );
+    return pet_expr_access_get_id( expr );
   }
 
   bool isRead(){
@@ -139,6 +140,13 @@ public:
 
     }
 
+    std::string getTupleName(){
+      auto domain = getDomain();
+      const char* name = isl_set_get_tuple_name( domain );
+      isl_set_free( domain );
+      return name;
+    }
+
 private:
 
   pet_stmt* stmt = nullptr;  
@@ -201,6 +209,15 @@ public:
 
     auto getScheduleTree( ) {
       return isl_schedule_intersect_domain(isl_schedule_copy(getSchedule()), getDomains());
+    }
+
+    ScopStmt* getStmtByTupleName( std::string name ) {
+      for( auto& element : scop_stmts ){
+        if ( element.getTupleName() == name ) {
+	  return &element;
+	}
+      }
+      return nullptr;
     }
 
     __isl_give isl_union_map* getAccessesOfType(std::function<bool(MemoryAccess &)> Predicate);
@@ -273,10 +290,12 @@ public:
     auto getWAW() { return WAW; };
     auto getRED() { return RED; };
     auto getDomains() { return scop.getDomains() ; }
+    
+    std::vector<std::pair<std::string,std::string>> find_reduction_variables( );
 
-    PlutoCompatData make_pluto_compatible( std::vector<int>& rename_table );
+    PlutoCompatData build_pluto_data( );
+    PlutoCompatData make_pluto_compatible( std::vector<int>& rename_table, PlutoCompatData& pcd );
 
-private:
 
     void collectInfo(Scop& S, isl_union_map **Read, isl_union_map **Write,
                         isl_union_map **MayWrite,

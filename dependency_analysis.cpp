@@ -595,7 +595,8 @@ void Dependences::setReductionDependences(MemoryAccess *MA, isl_map *D) {
   ReductionDependences[MA] = D;
 }
 
-PlutoCompatData Dependences::make_pluto_compatible( std::vector<int>& rename_table ) {
+
+PlutoCompatData Dependences::build_pluto_data( ) {
   PlutoCompatData pcd;
 
   std::cerr << "dep ana: creating compat data" << std::endl;
@@ -618,6 +619,13 @@ PlutoCompatData Dependences::make_pluto_compatible( std::vector<int>& rename_tab
   pcd.war = isl_union_map_copy(WAR);
   pcd.waw = isl_union_map_copy(WAW);
   pcd.red = isl_union_map_copy(RED);
+
+  return pcd;
+}
+
+PlutoCompatData Dependences::make_pluto_compatible( std::vector<int>& rename_table, PlutoCompatData& pcd ) {
+  
+  isl_space* space = scop.getParamSpace();
 
   std::cerr << "writes before rename" << std::endl;
   isl_union_map_dump(pcd.writes);
@@ -675,3 +683,64 @@ __isl_give isl_union_map *Scop::getAccesses() {
   return getAccessesOfType([](MemoryAccess &MA) { return true; });
 }
 
+
+// TODO one can improve this by not just fetching the tuple name but also the 
+// variable that it writes to. i have no idea on how to do that but for the time beeing
+// its ok to assume that if i find the statement that corresponds to this tuple name
+// it will only have one reduction like memory access
+// if a statement has more than one reduction like memory access it is most properbly wrong 
+// since the c++ standard says that multiple updates to variables in one statement 
+// will leed to undefined behaviour
+// TODO also handle the type of the reduction operation
+std::vector<std::pair<std::string,std::string>> Dependences::find_reduction_variables( ){
+
+  std::vector<std::pair<std::string,std::string>> reduction_variables;
+
+  auto pair = std::make_pair( &reduction_variables, this );
+  typedef decltype( pair ) data_type;
+
+  isl_union_map_foreach_map( RED, 
+      [](isl_map* map, void* user)
+      { 
+	auto user_data = (data_type*) user;
+	Dependences* dependences = user_data->second;
+	int in = isl_map_n_in( map );
+	int out = isl_map_n_out( map );
+	int param = isl_map_n_param( map );
+	std::cerr << "depana: " << in << " " << out  << " " << param  << std::endl;
+	const char* in_name = isl_map_get_tuple_name( map, isl_dim_in );
+	std::cerr << "depana: in name " << in_name << std::endl;
+	const char* out_name = isl_map_get_tuple_name( map, isl_dim_out );
+	if ( strcmp(in_name,out_name) != 0 ) {
+	  std::cerr << "depana warning: in and out name are not the same. never tested this case " << std::endl;
+	  exit(-1);
+	}
+
+	ScopStmt* s = dependences->scop.getStmtByTupleName( in_name );
+	if ( s ) {
+	  std::cerr << "depana: found the corresponding statement"  << std::endl;
+	  for( auto& MA : *s ){
+	    if ( MA.isReductionLike() ) {
+	      auto ba = MA.getBaseAddr();
+	      const char* name = isl_id_get_name( ba );
+	      std::cerr << "depana: name " << name  << " storing result in vector "<< std::endl;
+	      user_data->first->push_back( std::make_pair( in_name, name ) );
+	    }
+	  }
+	  
+	}else{
+	  std::cerr << "depana error: could not find the statement by its id" << std::endl;
+	  exit(-1);
+	}
+
+
+	return (isl_stat)0; 
+      }
+      ,
+      &pair
+       
+  );
+
+  return reduction_variables;
+
+}

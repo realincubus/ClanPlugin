@@ -62,6 +62,7 @@ int pluto_schedule_pluto( PlutoProg* prog, PlutoOptions* options );
 
 using namespace clang;
 using namespace clang::ast_matchers;
+using pluto_codegen_cxx::StatementInformation;
 
 namespace {
 
@@ -202,8 +203,104 @@ __isl_give isl_union_set *collect_non_kill_domains(struct pet_scop *scop )
         return domain;
 }
 
+
+// needed to call c++ delete and not c free
+static void delete_statement_information( void* user ){
+  StatementInformation* sinfo = (StatementInformation*)user;
+  delete sinfo;
+}
+
+struct AddInfoHelper {
+
+  AddInfoHelper( 
+      isl_union_set* _result, 
+      std::vector<std::string>& _statement_texts,
+      std::unique_ptr<std::map<std::string,std::string>>& _call_texts,
+      std::vector<std::pair<std::string,std::string>>& _reduction_variables_for_tuple_names    
+  ) :
+    result(_result),
+    statement_texts(_statement_texts),
+    call_texts(_call_texts),
+    reduction_variables_for_tuple_names(_reduction_variables_for_tuple_names)
+  {
+  }
+
+  isl_union_set* result;
+  std::vector<std::string>& statement_texts;
+  std::unique_ptr<std::map<std::string,std::string>>& call_texts;
+  std::vector<std::pair<std::string,std::string>>& reduction_variables_for_tuple_names;
+};
+
+// TODO make all of this get the information from statement_map and call_map or however they are called
+static isl_stat add_info_to_id( __isl_take isl_set* set, void* user ) {
+
+  auto user_data = (AddInfoHelper*) user;
+
+  if ( auto tuple_id = isl_set_get_tuple_id( set ) ) {
+    auto name = isl_id_get_name( tuple_id );
+
+    // extract the number from the tuple id 
+    assert(isdigit(name[2]));
+    int id = atoi(&name[2]);
+
+    // get the entry from the statement texts
+    auto statement_text = user_data->statement_texts[id];
+
+    auto ctx = isl_id_get_ctx( tuple_id );
+    StatementInformation* sinfo = new StatementInformation();
+
+    // add information from the statement table 
+    sinfo->statement_text = statement_text;
+    // TODO add real information sinfo->reductions.insert( std::make_pair( "sum", StatementInformation::REDUCTION_SUM ) );
+    
+    for( auto& pair : user_data->reduction_variables_for_tuple_names ){
+      std::cerr << "plugin: " << pair.first << " " << name << std::endl;
+      if ( name == pair.first ) {
+	sinfo->reductions.insert( std::make_pair( pair.second, StatementInformation::REDUCTION_SUM ) );
+      }
+    }
+    
+
+    auto new_id = isl_id_alloc( ctx, name, sinfo );
+    new_id = isl_id_set_free_user( new_id, &delete_statement_information ); 
+
+    auto new_set = isl_set_set_tuple_id( set, new_id );
+    isl_union_set_add_set( user_data->result, new_set );
+    return (isl_stat)0;
+  }
+
+  std::cerr << "plugin: this should never happen" << std::endl;
+  exit(-1);
+  // add the original if nothing changes
+  isl_union_set_add_set( user_data->result, set );
+  return (isl_stat)0;
+}
+
+isl_union_set* add_extra_infos_to_ids( 
+    isl_space* space, 
+    isl_union_set* sets, 
+    std::vector<std::string>& statement_texts, 
+    std::unique_ptr<std::map<std::string,std::string>>& call_texts,
+    std::vector<std::pair<std::string,std::string>>& reduction_variables_for_tuple_names    
+  ) {
+
+  AddInfoHelper helper( isl_union_set_empty( space ) ,
+      statement_texts,
+      call_texts,
+      reduction_variables_for_tuple_names 
+  );
+  isl_union_set_foreach_set( sets, &add_info_to_id, &helper );
+  isl_union_set_dump( helper.result );
+  return helper.result;
+}
+
 #if 1
-PlutoProg* compute_deps( pet_scop* pscop, PlutoOptions* options ) {
+PlutoProg* compute_deps( 
+    pet_scop* pscop, 
+    PlutoOptions* options, 
+    std::vector<std::string>& statement_texts,
+    std::unique_ptr<std::map<std::string,std::string>>& call_texts ) 
+  {
 
   // pet injects kill statements into every map 
   // i need to filter all of these things out in order to make it run like expected
@@ -290,7 +387,22 @@ PlutoProg* compute_deps( pet_scop* pscop, PlutoOptions* options ) {
   //Dependences dependences( pscop );
   Dependences dependences( pscop );
 
-  auto pluto_compat_data = dependences.make_pluto_compatible( rename_table );
+  auto reduction_variables_for_tuple_names = dependences.find_reduction_variables();
+  std::cerr << "plugin: r vars from dep ana " << reduction_variables_for_tuple_names.size() << std::endl;
+
+  // build the data that will not be linear
+  auto pluto_compat_data = dependences.build_pluto_data( );
+  // add information that corresponds to this data
+  pluto_compat_data.domains = add_extra_infos_to_ids( isl_set_get_space(pscop->context), 
+      pluto_compat_data.domains, 
+      statement_texts, 
+      call_texts,
+      reduction_variables_for_tuple_names
+  );
+
+  // reorder all to make it pluto compatible
+  dependences.make_pluto_compatible( rename_table, pluto_compat_data );
+
 
   // TODO the kill statements are not respected in isls dependency analysis 
   //      this needs to be taken into account in order to make scoped variables work like expected
@@ -321,8 +433,8 @@ PlutoProg* compute_deps( pet_scop* pscop, PlutoOptions* options ) {
 #endif
 
 
-PlutoProg* pet_to_pluto_prog(pet_scop* scop, PlutoOptions* pluto_options){
-  PlutoProg* prog =  compute_deps( scop, pluto_options ) ;
+PlutoProg* pet_to_pluto_prog(pet_scop* scop, PlutoOptions* pluto_options, std::vector<std::string>& statement_texts ,std::unique_ptr<std::map<std::string,std::string>>& call_texts ){
+  PlutoProg* prog =  compute_deps( scop, pluto_options, statement_texts, call_texts ) ;
   return prog;
 }
 
@@ -552,9 +664,12 @@ void create_scop_replacement( ASTContext& ctx_clang,
     pluto_options->isldep = true;
     // TODO this is a catastrophe !!!!! remove it
     //options = pluto_options;
+    
+    // find the text of the original statement
+    auto statement_texts = get_statement_texts( scop, sloc_file, SM, for_stmt );
 
     std::cerr << "generating pluto program from pet" << std::endl;
-    auto prog = pet_to_pluto_prog(scop, pluto_options);
+    auto prog = pet_to_pluto_prog(scop, pluto_options, statement_texts, call_texts);
     if ( !prog ) {
       std::cerr << "could not generate a pluto program from the given pet_scop" << std::endl;
       // TODO memory leak put everything into unique_ptr
@@ -590,8 +705,6 @@ void create_scop_replacement( ASTContext& ctx_clang,
 
   pet_scop_dump( scop );
 
-  // find the text of the original statement
-  auto statement_texts = get_statement_texts( scop, sloc_file, SM, for_stmt );
   //auto call_texts = get_call_texts( scop , sloc_file, SM, for_stmt );
 
   std::stringstream outfp;
