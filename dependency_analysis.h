@@ -25,19 +25,12 @@ public:
   virtual ~MemoryAccess () {}
 
   bool isReductionLike() {
-    // TODO implement by calling pet_ functions
-    //      right now simply return false since we have no idea
     return pet_expr_access_is_reduction( expr );
-    //return false;
   }
 
-  // TODO needs to return isl_map not union map -> this means that the access relations 
-  //      return by the functions have to containe only one element
-  // TODO continue here call the is_* functions and return the result otherwise its just an empty set
   isl_map* getAccessRelation();
 
   auto getBaseAddr() {
-    //return pet_expr_access_get_ref_id( expr );
     return pet_expr_access_get_id( expr );
   }
 
@@ -55,6 +48,10 @@ public:
 
   bool isMustWrite(){
 
+  }
+
+  pet_op_type getReductionType(){
+    return pet_expr_access_get_reduction_type( expr );
   }
 
   isl_id* getId(){
@@ -233,6 +230,14 @@ private:
     std::vector<ScopStmt> scop_stmts;
 };
 
+
+struct PetReductionVariableInfo {
+  std::string statement;
+  std::string var_name;
+  pet_op_type operation;
+};
+
+
 /// @brief for pluto compatibility
 struct PlutoCompatData{
     isl_union_map* schedule = nullptr;
@@ -291,7 +296,8 @@ public:
     auto getRED() { return RED; };
     auto getDomains() { return scop.getDomains() ; }
     
-    std::vector<std::pair<std::string,std::string>> find_reduction_variables( );
+
+    std::vector<PetReductionVariableInfo> find_reduction_variables( );
 
     PlutoCompatData build_pluto_data( );
     PlutoCompatData make_pluto_compatible( std::vector<int>& rename_table, PlutoCompatData& pcd );

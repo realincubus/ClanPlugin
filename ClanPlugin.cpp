@@ -216,7 +216,7 @@ struct AddInfoHelper {
       isl_union_set* _result, 
       std::vector<std::string>& _statement_texts,
       std::unique_ptr<std::map<std::string,std::string>>& _call_texts,
-      std::vector<std::pair<std::string,std::string>>& _reduction_variables_for_tuple_names    
+      std::vector<PetReductionVariableInfo>& _reduction_variables_for_tuple_names    
   ) :
     result(_result),
     statement_texts(_statement_texts),
@@ -228,7 +228,32 @@ struct AddInfoHelper {
   isl_union_set* result;
   std::vector<std::string>& statement_texts;
   std::unique_ptr<std::map<std::string,std::string>>& call_texts;
-  std::vector<std::pair<std::string,std::string>>& reduction_variables_for_tuple_names;
+  std::vector<PetReductionVariableInfo>& reduction_variables_for_tuple_names;
+};
+
+
+struct PlutoRedcutionVariableInfo {
+  explicit PlutoRedcutionVariableInfo( PetReductionVariableInfo& p ) {
+    statement = p.statement;
+    var_name = p.var_name;  
+    // TODO map pet operations to pluto reduction operations
+    if ( p.operation == pet_op_add_assign ) {
+      std::cerr << "plugin: converted to pluto + sum" << std::endl;
+      operation = StatementInformation::REDUCTION_SUM;
+      return;
+    } 
+    if ( p.operation == pet_op_mul_assign ) {
+      std::cerr << "plugin: converted to pluto + mul" << std::endl;
+      operation = StatementInformation::REDUCTION_MUL;
+      return;
+    } 
+
+    std::cerr << "plugin: dont know this reduction type " << p.operation << std::endl;
+    exit(-1);
+  }
+  std::string statement;
+  std::string var_name;
+  pluto_codegen_cxx::StatementInformation::ReductionOperation operation;
 };
 
 // TODO make all of this get the information from statement_map and call_map or however they are called
@@ -251,12 +276,12 @@ static isl_stat add_info_to_id( __isl_take isl_set* set, void* user ) {
 
     // add information from the statement table 
     sinfo->statement_text = statement_text;
-    // TODO add real information sinfo->reductions.insert( std::make_pair( "sum", StatementInformation::REDUCTION_SUM ) );
     
-    for( auto& pair : user_data->reduction_variables_for_tuple_names ){
-      std::cerr << "plugin: " << pair.first << " " << name << std::endl;
-      if ( name == pair.first ) {
-	sinfo->reductions.insert( std::make_pair( pair.second, StatementInformation::REDUCTION_SUM ) );
+    for( auto& rvar_info : user_data->reduction_variables_for_tuple_names ){
+      std::cerr << "plugin: " << rvar_info.statement << " " << name << std::endl;
+      if ( name == rvar_info.statement ) {
+	PlutoRedcutionVariableInfo p(rvar_info);
+	sinfo->reductions.insert( std::make_pair( p.var_name, p.operation ) );
       }
     }
     
@@ -281,7 +306,7 @@ isl_union_set* add_extra_infos_to_ids(
     isl_union_set* sets, 
     std::vector<std::string>& statement_texts, 
     std::unique_ptr<std::map<std::string,std::string>>& call_texts,
-    std::vector<std::pair<std::string,std::string>>& reduction_variables_for_tuple_names    
+    std::vector<PetReductionVariableInfo>& reduction_variables_for_tuple_names    
   ) {
 
   AddInfoHelper helper( isl_union_set_empty( space ) ,
@@ -302,6 +327,13 @@ PlutoProg* compute_deps(
     std::unique_ptr<std::map<std::string,std::string>>& call_texts ) 
   {
 
+  std::cerr << "plugin: building rename table" << std::endl;
+  isl_union_set* domains = collect_non_kill_domains( pscop );
+  std::vector<int> rename_table;
+  build_rename_table( domains, rename_table );
+  std::cerr << "plugin: done building rename table" << std::endl;
+
+#if 0
   // pet injects kill statements into every map 
   // i need to filter all of these things out in order to make it run like expected
   isl_union_map* schedule= isl_schedule_get_map(pscop->schedule);
@@ -309,10 +341,7 @@ PlutoProg* compute_deps(
   isl_union_map* write = pet_scop_collect_must_writes(pscop);
   isl_union_map* empty = isl_union_map_empty(isl_set_get_space(pscop->context));
 
-  isl_union_set* domains = collect_non_kill_domains( pscop );
 
-  std::vector<int> rename_table;
-  build_rename_table( domains, rename_table );
 
   auto space = isl_set_get_space( pscop->context );
 
@@ -328,7 +357,6 @@ PlutoProg* compute_deps(
   isl_set* context = pscop->context;
   std::cerr << "calling pluto_compute_deps with this context " << std::endl;
   isl_set_dump( pscop->context );
-
   // TODO plutos pet branch says that the schedule is not aligned with 
   //      the context. i dont know whether this is still needed after 
   //      pet also changed since the pet branch implementation
@@ -383,15 +411,20 @@ PlutoProg* compute_deps(
       nullptr
   );
 
+#endif
 
+  std::cerr << "plugin: starting to calculate the dependencies" << std::endl;
   //Dependences dependences( pscop );
   Dependences dependences( pscop );
 
   auto reduction_variables_for_tuple_names = dependences.find_reduction_variables();
   std::cerr << "plugin: r vars from dep ana " << reduction_variables_for_tuple_names.size() << std::endl;
 
+  std::cerr << "plugin: building pluto data (non compatible) " << std::endl;
   // build the data that will not be linear
   auto pluto_compat_data = dependences.build_pluto_data( );
+
+  std::cerr << "plugin: adding info to ids (non compatible) " << std::endl;
   // add information that corresponds to this data
   pluto_compat_data.domains = add_extra_infos_to_ids( isl_set_get_space(pscop->context), 
       pluto_compat_data.domains, 
@@ -400,10 +433,12 @@ PlutoProg* compute_deps(
       reduction_variables_for_tuple_names
   );
 
+  std::cerr << "plugin: making pluto data compatible" << std::endl;
   // reorder all to make it pluto compatible
   dependences.make_pluto_compatible( rename_table, pluto_compat_data );
 
 
+  std::cerr << "plugin: calling pluto_compute_deps" << std::endl;
   // TODO the kill statements are not respected in isls dependency analysis 
   //      this needs to be taken into account in order to make scoped variables work like expected
 #if 0
@@ -435,6 +470,7 @@ PlutoProg* compute_deps(
 
 PlutoProg* pet_to_pluto_prog(pet_scop* scop, PlutoOptions* pluto_options, std::vector<std::string>& statement_texts ,std::unique_ptr<std::map<std::string,std::string>>& call_texts ){
   PlutoProg* prog =  compute_deps( scop, pluto_options, statement_texts, call_texts ) ;
+  std::cerr << "plugin: pluto program generated"  << std::endl;
   return prog;
 }
 

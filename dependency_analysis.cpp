@@ -627,8 +627,9 @@ PlutoCompatData Dependences::make_pluto_compatible( std::vector<int>& rename_tab
   
   isl_space* space = scop.getParamSpace();
 
-  std::cerr << "writes before rename" << std::endl;
+  std::cerr << "writes before rename " << pcd.writes << std::endl;
   isl_union_map_dump(pcd.writes);
+  std::cerr << "done writes before rename" << std::endl;
   if ( rename_table.size() > 0 ) {
     pcd.schedule = linearize_union_map( space, pcd.schedule, rename_table );
     pcd.reads = linearize_union_map( space, pcd.reads, rename_table );
@@ -645,9 +646,15 @@ PlutoCompatData Dependences::make_pluto_compatible( std::vector<int>& rename_tab
   return pcd;
 }
 
+
+// since pet stores the read and write information for the memory accesses but changes the
+// iteration space to indicate that the statement can not be executed this function needs to 
+// skip these statements somehow
 __isl_give isl_union_map *
 Scop::getAccessesOfType(std::function<bool(MemoryAccess &)> Predicate) {
   isl_union_map *Accesses = isl_union_map_empty(getParamSpace());
+
+  std::cerr << "depana: " << __PRETTY_FUNCTION__ << std::endl;
 
   for (ScopStmt &Stmt : *this) {
     for (MemoryAccess& MA : Stmt) {
@@ -655,7 +662,15 @@ Scop::getAccessesOfType(std::function<bool(MemoryAccess &)> Predicate) {
         continue;
 
       isl_set *Domain = Stmt.getDomain();
+      std::cerr << "depana: domain:" << std::endl;
+      isl_set_dump( Domain );
       isl_map *AccessDomain = MA.getAccessRelation();
+      std::cerr << "depana: accessrelation:" << std::endl;
+      isl_map_dump( AccessDomain );
+
+      if ( !AccessDomain ) 
+	continue;
+
       AccessDomain = isl_map_intersect_domain(AccessDomain, Domain);
       Accesses = isl_union_map_add_map(Accesses, AccessDomain);
     }    
@@ -692,9 +707,9 @@ __isl_give isl_union_map *Scop::getAccesses() {
 // since the c++ standard says that multiple updates to variables in one statement 
 // will leed to undefined behaviour
 // TODO also handle the type of the reduction operation
-std::vector<std::pair<std::string,std::string>> Dependences::find_reduction_variables( ){
+std::vector<PetReductionVariableInfo> Dependences::find_reduction_variables( ){
 
-  std::vector<std::pair<std::string,std::string>> reduction_variables;
+  std::vector<PetReductionVariableInfo> reduction_variables;
 
   auto pair = std::make_pair( &reduction_variables, this );
   typedef decltype( pair ) data_type;
@@ -724,7 +739,8 @@ std::vector<std::pair<std::string,std::string>> Dependences::find_reduction_vari
 	      auto ba = MA.getBaseAddr();
 	      const char* name = isl_id_get_name( ba );
 	      std::cerr << "depana: name " << name  << " storing result in vector "<< std::endl;
-	      user_data->first->push_back( std::make_pair( in_name, name ) );
+	      auto op_type = MA.getReductionType();
+	      user_data->first->push_back( PetReductionVariableInfo{ in_name, name, op_type } );
 	    }
 	  }
 	  

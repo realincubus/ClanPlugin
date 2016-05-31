@@ -30,6 +30,7 @@ inline isl_set* rename_set( isl_set* set, std::vector<int>& rename_table ) {
   return new_isl_set;
 }
 
+#if 0
 inline isl_map* rename_map( isl_map* map, std::vector<int>& rename_table ) {
   isl_dim_type t = isl_dim_in;
   const char *name = isl_map_get_tuple_name(map,t);
@@ -50,7 +51,7 @@ inline isl_map* rename_map( isl_map* map, std::vector<int>& rename_table ) {
 
   return new_isl_map;
 }
-
+#endif
 
 // TODO use the rename_set function
 // let the domain names be in accending order without gaps
@@ -90,62 +91,68 @@ inline isl_union_set* linearize_union_set( isl_space* space, isl_union_set* doma
   );
   return new_domain;
 }
+inline isl_stat rename_map( isl_map* map, void* user ) { 
+  map_rename_data* user_data = (map_rename_data*)(user);
+  std::cerr << __FILE__ << " " << __LINE__ << std::endl;
 
-// TODO this does not rename the other side of the equation 
-// S_1[i] -> S_1[i+1] : ... to S_0 becomes:
-// S_0[i] -> S_1[i+1] : ...
-inline isl_union_map* linearize_union_map( isl_space* space, isl_union_map* schedule, std::vector<int>& rename_table){
+  auto rename = [&](isl_map* map, isl_dim_type t){
+    std::cerr << __FILE__ << " " << __LINE__ << std::endl;
+    const char *name = isl_map_get_tuple_name(map,t);
+    if ( name == nullptr ) {
+      std::cerr << "pluto compat: could not get the name for dim type " << t << std::endl;
+      return (isl_map*)nullptr;
+    }
+    std::cerr << "tuple name is " << name << std::endl;
+
+    char *new_name = (char*)malloc(sizeof(const char) * 10 );
+
+    assert(isdigit(name[2]));
+    int id = atoi(&name[2]);
+
+    std::vector<int>& rename_table = (*user_data->rename_table);
+    int new_id = rename_table[id];
+
+    if ( new_id < 0 || new_id >= rename_table.size() ) { 
+      std::cerr << "plugin: element was filtered" << std::endl;
+      return (isl_map*)nullptr;
+    }
+
+    sprintf( new_name, "S_%d", new_id );
+    std::cerr << "renaming from " <<  name << " to " << new_name << std::endl;    
+    
+    isl_map_dump( map );
+    auto new_isl_map = isl_map_set_tuple_name(map,t, new_name );
+    isl_map_dump( new_isl_map );
+    const char *set_name = isl_map_get_tuple_name(new_isl_map, t );
+    std::cerr << "done renaming" << std::endl;    
+    return new_isl_map;
+  };
+
+  if ( auto new_map = rename( map, isl_dim_in ) ){
+    if ( auto new_new_map = rename( new_map, isl_dim_out ) ) {
+      isl_union_map_add_map( user_data->new_map, new_new_map );
+      return (isl_stat)0;
+    }
+    isl_union_map_add_map( user_data->new_map, new_map );
+    return (isl_stat)0;
+  }
+
+  std::cerr << __FILE__ << " " << __LINE__ << std::endl;
+  return (isl_stat)0;    
+}
+inline isl_union_map* linearize_union_map( isl_space* space, isl_union_map* map, std::vector<int>& rename_table){
+  std::cerr << __FILE__ << " " << __LINE__ << std::endl;
   map_rename_data user_data;
   isl_union_map* new_map = isl_union_map_empty( space );
   user_data.new_map = new_map; 
   user_data.rename_table = &rename_table;
 
-  isl_union_map_foreach_map(schedule, 
-      []( __isl_take isl_map* map, void* user ) {
-	map_rename_data* user_data = (map_rename_data*)(user);
-
-	auto rename = [&](isl_map* map, isl_dim_type t){
-	  const char *name = isl_map_get_tuple_name(map,t);
-	  std::cerr << "tuple name is " << name << std::endl;
-	  if ( name == nullptr ) {
-	    return (isl_map*)nullptr;
-	  }
-	  char *new_name = (char*)malloc(sizeof(const char) * 10 );
-
-	  assert(isdigit(name[2]));
-	  int id = atoi(&name[2]);
-
-	  std::vector<int>& rename_table = (*user_data->rename_table);
-	  int new_id = rename_table[id];
-
-	  if ( new_id < 0 || new_id >= rename_table.size() ) { 
-	    std::cerr << "plugin: element was filtered" << std::endl;
-	    return (isl_map*)nullptr;
-	  }
-
-	  sprintf( new_name, "S_%d", new_id );
-	  std::cerr << "renaming from " <<  name << " to " << new_name << std::endl;    
-	  
-	  isl_map_dump( map );
-	  auto new_isl_map = isl_map_set_tuple_name(map,t, new_name );
-	  isl_map_dump( new_isl_map );
-	  const char *set_name = isl_map_get_tuple_name(new_isl_map, t );
-	  std::cerr << "done renaming" << std::endl;    
-	  return new_isl_map;
-	};
-
-	if ( auto new_map = rename( map, isl_dim_in ) ){
-	  if ( auto new_new_map = rename( new_map, isl_dim_out ) ) {
-	    isl_union_map_add_map( user_data->new_map, new_new_map );
-	    return (isl_stat)0;
-	  }
-	}
-
-	return (isl_stat)0;    
-      }, 
+  isl_union_map_foreach_map(map, 
+      rename_map, 
       &user_data
   ); 
 
+  std::cerr << __FILE__ << " " << __LINE__ << std::endl;
   return new_map;
 }
 
