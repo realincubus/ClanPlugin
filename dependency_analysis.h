@@ -9,227 +9,11 @@
 #include <isl/set.h>
 #include <isl/union_set.h>
 #include <isl/ctx.h>
+
 #include <iostream>
 #include <llvm/ADT/DenseMap.h>
 
-// a statement has multiple memory accesses
-
-// Adapter class that uses pet_expr to provide information
-class MemoryAccess {
-public:
-  MemoryAccess (pet_expr* _expr) :
-    expr(_expr)
-  {
-      std::cerr << "dep analysis: new access " << std::endl;
-  }
-  virtual ~MemoryAccess () {}
-
-  bool isReductionLike() {
-    return pet_expr_access_is_reduction( expr );
-  }
-
-  isl_map* getAccessRelation();
-
-  auto getBaseAddr() {
-    return pet_expr_access_get_id( expr );
-  }
-
-  bool isRead(){
-    return pet_expr_access_is_read( expr );
-  }
-  
-  bool isWrite(){
-    return pet_expr_access_is_write( expr );
-  }
-
-  bool isMayWrite(){
-
-  }
-
-  bool isMustWrite(){
-
-  }
-
-  pet_op_type getReductionType(){
-    return pet_expr_access_get_reduction_type( expr );
-  }
-
-  isl_id* getId(){
-    return pet_expr_access_get_id( expr );
-  }
-
-  isl_id* getArrayId(){
-    return pet_expr_access_get_ref_id( expr );
-  }
-
-private:
-  
-  pet_expr* expr = nullptr;  
-
-};
-
-static int helper(__isl_keep pet_expr* expr, void* user ){
-  std::vector<MemoryAccess>* memory_accesses = (std::vector<MemoryAccess>*) user;
-  memory_accesses->emplace_back( expr );
-  return 0;
-}
-
-class ScopStmt {
-public:
-    ScopStmt (pet_stmt* _s, isl_union_map* _schedule) :
-      stmt(_s),
-      schedule( _schedule )
-    {
-      std::cerr << "dep analysis: new stmt with " << " x accesses " << std::endl;
-      pet_tree_foreach_access_expr( 
-	  stmt->body, &helper 
-	  /*
-	  [&]( __isl_keep pet_expr* expr, void* user ) {
-	    memory_accesses.emplace_back( expr );
-	    return (int)0;
-	  }
-	  */
-	  ,
-	  &memory_accesses
-      );
-      
-    }
-    virtual ~ScopStmt () {}
-
-    isl_set* getDomain(){
-      return isl_set_copy(stmt->domain);    
-    }
-
-    auto begin(){
-      return memory_accesses.begin();
-    }
-
-    auto end(){
-      return memory_accesses.end();
-    }
-
-    auto getDomainSpace() const {
-      return isl_set_get_space(stmt->domain);
-    }
-
-    // from ScopInfo.cpp
-    auto getSchedule(){
-      isl_set *Domain = getDomain();
-      if (isl_set_is_empty(Domain)) {
-	isl_set_free(Domain);
-	return isl_map_from_aff(
-	    isl_aff_zero_on_domain(isl_local_space_from_space(getDomainSpace())));
-      }
-      auto *Schedule = isl_union_map_copy(schedule);
-      Schedule = isl_union_map_intersect_domain(
-	  Schedule, isl_union_set_from_set(isl_set_copy(Domain)));
-      if (isl_union_map_is_empty(Schedule)) {
-	isl_set_free(Domain);
-	isl_union_map_free(Schedule);
-	return isl_map_from_aff(
-	    isl_aff_zero_on_domain(isl_local_space_from_space(getDomainSpace())));
-      }
-      auto *M = isl_map_from_union_map(Schedule);
-      M = isl_map_coalesce(M);
-      M = isl_map_gist_domain(M, Domain);
-      M = isl_map_coalesce(M);
-      return M;
-
-    }
-
-    std::string getTupleName(){
-      auto domain = getDomain();
-      const char* name = isl_set_get_tuple_name( domain );
-      isl_set_free( domain );
-      return name;
-    }
-
-private:
-
-  pet_stmt* stmt = nullptr;  
-  isl_union_map* schedule = nullptr;
-  std::vector<MemoryAccess> memory_accesses;
-    
-};
-
-class Scop {
-public:
-
-
-    auto getSchedule(){
-      return scop->schedule;
-    }
-
-    Scop (pet_scop* _s) :
-      scop(_s)
-    {
-      std::cerr << "dep analysis: new scop with " << scop->n_stmt << " statements " << std::endl;
-      for (int i = 0; i < scop->n_stmt; ++i){
-        scop_stmts.emplace_back( scop->stmts[i], isl_schedule_get_map(getSchedule()) );
-      }
-    }
-    virtual ~Scop () {}
-
-
-    isl_space* getParamSpace() {
-      return isl_set_get_space(scop->context);
-    }
-
-    auto begin(){
-      return scop_stmts.begin();
-    }
-
-    auto end(){
-      return scop_stmts.end();
-    }
-
-    auto getContext(){
-      return scop->context;
-    }
-
-#if 0
-    // this will collect kill statements and domains that are not in use
-    auto getDomains() {
-      return pet_scop_collect_domains(scop);
-    }
-#endif
-
-    auto getDomains() {
-      isl_union_set *Domain = isl_union_set_empty(getParamSpace());
-
-      for (ScopStmt &Stmt : *this) {
-	Domain = isl_union_set_add_set(Domain, Stmt.getDomain());
-      }
-
-      return Domain;
-    }
-
-    auto getScheduleTree( ) {
-      return isl_schedule_intersect_domain(isl_schedule_copy(getSchedule()), getDomains());
-    }
-
-    ScopStmt* getStmtByTupleName( std::string name ) {
-      for( auto& element : scop_stmts ){
-        if ( element.getTupleName() == name ) {
-	  return &element;
-	}
-      }
-      return nullptr;
-    }
-
-    __isl_give isl_union_map* getAccessesOfType(std::function<bool(MemoryAccess &)> Predicate);
-    __isl_give isl_union_map* getMustWrites();
-    __isl_give isl_union_map* getMayWrites();
-    __isl_give isl_union_map* getWrites();
-    __isl_give isl_union_map* getReads();
-    __isl_give isl_union_map* getAccesses();
-private:
-
-
-    pet_scop* scop;
-    std::vector<ScopStmt> scop_stmts;
-};
-
+#include "Scop.hpp"
 
 struct PetReductionVariableInfo {
   std::string statement;
@@ -255,9 +39,6 @@ struct PlutoCompatData{
 
 class Dependences {
 public:
-
-    /// @brief Map type for reduction dependences.
-    using ReductionDependencesMapTy = llvm::DenseMap<MemoryAccess *, isl_map *>;
 
     enum AnalyisLevel {
       AL_Statement = 0,
@@ -337,9 +118,6 @@ public:
     int OptComputeOut = 500000;
 
     AnalysisType OptAnalysisType = VALUE_BASED_ANALYSIS;
-
-    /// @brief Mapping from memory accesses to their reduction dependences.
-    ReductionDependencesMapTy ReductionDependences;
 
     Scop scop;
     

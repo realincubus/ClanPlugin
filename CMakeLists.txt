@@ -58,6 +58,9 @@ add_llvm_loadable_module(
   ClanPlugin.cpp 
   dependency_analysis.cpp
   stdlib_matchers.cpp 
+  MemoryAccess.cpp
+  Scop.cpp
+  ScopStmt.cpp
 )
 
 target_link_libraries( 

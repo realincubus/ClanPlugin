@@ -2,22 +2,11 @@
 
 #include "dependency_analysis.h"
 #include "pluto_compat.h"
+#include "MemoryAccess.hpp"
+#include "ScopStmt.hpp"
 
 #include <iostream>
 
-// TODO all of this needs to be based on a pet scop not on pollys Scop class
-
-// TODO i guess i also need to implement a MemoryAccess class otherwise this will get very complicated
-
-isl_map* MemoryAccess::getAccessRelation(){
-  if ( pet_expr_access_is_read( expr ) ) {
-    return isl_map_from_union_map(pet_expr_access_get_may_read( expr ));
-  }
-  if ( pet_expr_access_is_write( expr ) ) {
-    return isl_map_from_union_map(pet_expr_access_get_may_write( expr ));
-  }
-  return (isl_map*)nullptr;
-}
 
 /// @brief Tag the @p Relation domain with @p TagId
 static __isl_give isl_map *tag(__isl_take isl_map *Relation,
@@ -64,15 +53,15 @@ Dependences::collectInfo(Scop &S, isl_union_map **Read, isl_union_map **Write,
 #if 1
   std::set<const isl_id *> ReductionBaseValues;
   if (UseReductions)
-    for (ScopStmt &Stmt : S)
-      for (MemoryAccess& MA : Stmt)
+    for (ScopStmt *Stmt : S)
+      for (MemoryAccess& MA : *Stmt)
         if (MA.isReductionLike())
           ReductionBaseValues.insert(MA.getBaseAddr());
 #endif
 
-  for (ScopStmt &Stmt : S) {
-    for (MemoryAccess& MA : Stmt) {
-      isl_set *domcp = Stmt.getDomain();
+  for (ScopStmt *Stmt : S) {
+    for (MemoryAccess& MA : *Stmt) {
+      isl_set *domcp = Stmt->getDomain();
       isl_map *accdom = MA.getAccessRelation();
       std::cerr << "dep anaylsis: dumping isl_union_map of accdom"  << std::endl;
       if ( !accdom ) {
@@ -98,7 +87,7 @@ Dependences::collectInfo(Scop &S, isl_union_map **Read, isl_union_map **Write,
         // but as we transformed the access domain we need the schedule
         // to match the new access domains, thus we need
         //   [Stmt[i0, i1] -> MemAcc_A[i0 + i1]] -> [0, i0, 2, i1, 0]
-        isl_map *Schedule = Stmt.getSchedule();
+        isl_map *Schedule = Stmt->getSchedule();
         Schedule = isl_map_apply_domain(
             Schedule,
             isl_map_reverse(isl_map_domain_map(isl_map_copy(accdom))));
@@ -109,7 +98,7 @@ Dependences::collectInfo(Scop &S, isl_union_map **Read, isl_union_map **Write,
 #endif
         accdom = tag(accdom, &MA, Level);
         if (Level > Dependences::AL_Statement) {
-          isl_map *Schedule = tag(Stmt.getSchedule(), &MA, Level);
+          isl_map *Schedule = tag(Stmt->getSchedule(), &MA, Level);
           *StmtSchedule = isl_union_map_add_map(*StmtSchedule, Schedule);
         }
 #if 1
@@ -128,7 +117,7 @@ Dependences::collectInfo(Scop &S, isl_union_map **Read, isl_union_map **Write,
     }
 
     if (Level == Dependences::AL_Statement){
-      *StmtSchedule = isl_union_map_add_map(*StmtSchedule, Stmt.getSchedule());
+      *StmtSchedule = isl_union_map_add_map(*StmtSchedule, Stmt->getSchedule());
     }
     std::cerr << "done " << __PRETTY_FUNCTION__ << std::endl;
   }
@@ -379,8 +368,8 @@ void Dependences::calculateDependences( Scop& S ){
 
   // Step 1)
   RED = isl_union_map_empty(isl_union_map_get_space(RAW));
-  for (ScopStmt &Stmt : S) {
-    for (MemoryAccess& MA : Stmt) {
+  for (ScopStmt *Stmt : S) {
+    for (MemoryAccess& MA : *Stmt) {
       if (!MA.isReductionLike())
         continue;
       isl_set *AccDomW = isl_map_wrap(MA.getAccessRelation());
@@ -426,8 +415,8 @@ void Dependences::calculateDependences( Scop& S ){
   // We then move this portion of reduction dependences back to the statement ->
   // statement space and add a mapping from the memory access to these
   // dependences.
-  for (ScopStmt &Stmt : S) {
-    for (MemoryAccess& MA : Stmt) {
+  for (ScopStmt *Stmt : S) {
+    for (MemoryAccess& MA : *Stmt) {
       if (!MA.isReductionLike())
         continue;
 
@@ -441,7 +430,6 @@ void Dependences::calculateDependences( Scop& S ){
       RED_SIN = isl_union_map_add_map(RED_SIN, isl_map_copy(AccRedDep));
       AccRedDep = isl_map_zip(AccRedDep);
       AccRedDep = isl_set_unwrap(isl_map_domain(AccRedDep));
-      setReductionDependences(&MA, AccRedDep);
     }
   }
 
@@ -589,12 +577,6 @@ void Dependences::addPrivatizationDependences() {
   isl_union_set_free(Universe);
 }
 
-void Dependences::setReductionDependences(MemoryAccess *MA, isl_map *D) {
-  assert(ReductionDependences.count(MA) == 0 &&
-         "Reduction dependences set twice!");
-  ReductionDependences[MA] = D;
-}
-
 
 PlutoCompatData Dependences::build_pluto_data( ) {
   PlutoCompatData pcd;
@@ -656,12 +638,12 @@ Scop::getAccessesOfType(std::function<bool(MemoryAccess &)> Predicate) {
 
   std::cerr << "depana: " << __PRETTY_FUNCTION__ << std::endl;
 
-  for (ScopStmt &Stmt : *this) {
-    for (MemoryAccess& MA : Stmt) {
+  for (ScopStmt *Stmt : *this) {
+    for (MemoryAccess& MA : *Stmt) {
       if (!Predicate(MA))
         continue;
 
-      isl_set *Domain = Stmt.getDomain();
+      isl_set *Domain = Stmt->getDomain();
       std::cerr << "depana: domain:" << std::endl;
       isl_set_dump( Domain );
       isl_map *AccessDomain = MA.getAccessRelation();
@@ -740,7 +722,7 @@ std::vector<PetReductionVariableInfo> Dependences::find_reduction_variables( ){
 	      const char* name = isl_id_get_name( ba );
 	      std::cerr << "depana: name " << name  << " storing result in vector "<< std::endl;
 	      auto op_type = MA.getReductionType();
-	      user_data->first->push_back( PetReductionVariableInfo{ in_name, name, op_type } );
+	      user_data->first->push_back( PetReductionVariableInfo{ in_name, name, (pet_op_type)op_type } );
 	    }
 	  }
 	  
