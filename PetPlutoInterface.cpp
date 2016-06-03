@@ -34,8 +34,14 @@ using pluto_codegen_cxx::StatementInformation;
 
 
 
-PetPlutoInterface::PetPlutoInterface( std::set<std::string>& _header_includes ) : 
-  header_includes(_header_includes) 
+PetPlutoInterface::PetPlutoInterface( 
+    std::set<std::string>& _header_includes, 
+    pluto_codegen_cxx::EMIT_CODE_TYPE _emit_code_type, 
+    bool _write_cloog_file 
+  ) : 
+  header_includes(_header_includes),
+  emit_code_type(_emit_code_type),
+  write_cloog_file(_write_cloog_file)
 {
 
 }
@@ -325,11 +331,8 @@ PlutoProg* PetPlutoInterface::pet_to_pluto_prog(pet_scop* scop, PlutoOptions* pl
 
 bool PetPlutoInterface::create_scop_replacement(  
     pet_scop* scop, 
-    pluto_codegen_cxx::EMIT_CODE_TYPE emit_code_type, 
-    bool write_cloog_file, 
     std::vector<std::string>& statement_texts,
-    std::unique_ptr<std::map<std::string,std::string>>& call_texts,
-    std::string& replacement
+    std::unique_ptr<std::map<std::string,std::string>>& call_texts
   ) {
 
   pet_scop_align_params( scop );

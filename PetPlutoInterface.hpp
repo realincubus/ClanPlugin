@@ -18,21 +18,25 @@ struct pet_scop;
 
 class PetPlutoInterface {
 public:
-    PetPlutoInterface (std::set<std::string>& _header_includes); 
+    PetPlutoInterface (
+	std::set<std::string>& _header_includes, 
+	pluto_codegen_cxx::EMIT_CODE_TYPE _emit_code_type, 
+	bool _write_cloog_file
+    ); 
     virtual ~PetPlutoInterface () {}
 
     bool create_scop_replacement(
       pet_scop* scop, 
-      pluto_codegen_cxx::EMIT_CODE_TYPE emit_code_type, 
-      bool write_cloog_file, 
       std::vector<std::string>& statement_texts,
-      std::unique_ptr<std::map<std::string,std::string>>& call_texts,
-      std::string& replacement
+      std::unique_ptr<std::map<std::string,std::string>>& call_texts
     );
+
+    std::string getReplacement(){
+      return replacement;
+    }
 
 protected:
 
-  std::set<std::string>& header_includes;
 
   void build_rename_table( isl_union_set* domains, std::vector<int>& table );
   isl_union_set *collect_non_kill_domains(struct pet_scop *scop );
@@ -49,5 +53,10 @@ protected:
     std::unique_ptr<std::map<std::string,std::string>>& call_texts 
   );
 
+  std::set<std::string>& header_includes;
+  pluto_codegen_cxx::EMIT_CODE_TYPE emit_code_type;
+  bool write_cloog_file;
+
+  std::string replacement;
 
 };

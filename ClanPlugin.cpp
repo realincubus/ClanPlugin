@@ -32,7 +32,8 @@
 #include <memory>
 
 // internal
-#include "stdlib_matchers.hpp"
+//#include "stdlib_matchers.hpp"
+// TODO needed for setting the right flag but should be moved to PetPlutoInterface
 #include <pluto_codegen_cxx.hpp>
 
 #include "PetPlutoInterface.hpp"
@@ -57,10 +58,9 @@ class Callback : public MatchFinder::MatchCallback {
        std::cerr << "plugin: callback called " << std::endl;
        ASTContext& context = *Result.Context;
        SourceManager& SM = context.getSourceManager();
-       DiagnosticsEngine& diag = context.getDiagnostics();
 
-       if ( auto* function_decl = Result.Nodes.getNodeAs<FunctionDecl>("function_decl") ) {
-	 if ( auto* for_stmt = Result.Nodes.getNodeAs<ForStmt>("for_stmt") ) {
+       if ( auto function_decl = Result.Nodes.getNodeAs<FunctionDecl>("function_decl") ) {
+	 if ( auto for_stmt = Result.Nodes.getNodeAs<ForStmt>("for_stmt") ) {
 	   auto loc = for_stmt->getLocStart();
 	   if ( SM.isInMainFile( loc ) ) {
 
@@ -77,14 +77,17 @@ class Callback : public MatchFinder::MatchCallback {
 
 	       std::cerr << "found a valid scop" << std::endl;
 	       // TODO move common variables into the ctor
-	       PetPlutoInterface pp_interface(header_includes);
-	       std::string replacement;
-	       if ( pp_interface.create_scop_replacement( scop, emit_code_type, write_cloog_file, statement_texts, call_texts, replacement ) ){
+	       PetPlutoInterface pp_interface(header_includes, emit_code_type, write_cloog_file);
+	       if ( pp_interface.create_scop_replacement( scop, statement_texts, call_texts ) ){
+
 		 std::cerr << "emitting diagnositc" << std::endl;
+		 DiagnosticsEngine& diag = context.getDiagnostics();
 		 unsigned DiagID = diag.getCustomDiagID(DiagnosticsEngine::Warning, "found a scop");
 		 std::cerr << "got id " << DiagID << std::endl;
 
+		 auto replacement = pp_interface.getReplacement();
 		 auto begin_scop = cp_interface.getLocBeginOfScop();
+
 		 // replace the for statement
 		 diag.Report(begin_scop, DiagID) << FixItHint::CreateReplacement(for_stmt->getSourceRange(), replacement.c_str() );
 		 std::cerr << "reported error " << DiagID << std::endl;

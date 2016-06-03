@@ -228,10 +228,9 @@ pet_scop* ClangPetInterface::extract_scop(
   Pet pet_scanner( diag, &ctx_clang );
   std::cerr << "done creating the Pet scanner object" << std::endl;
 
-  pet_scop* scop = nullptr;
-
   auto begin_pet = std::chrono::high_resolution_clock::now();
   std::cerr << "calling pet_scop_extract_from_clang_ast" << std::endl;
+  // sets the instance variable scop
   pet_scanner.pet_scop_extract_from_clang_ast(&ctx_clang,(ForStmt*)for_stmt, (FunctionDecl*) function_decl, call_texts, &scop); 
 
   std::cerr << "done calling pet_scop_extract_from_clang_ast" << std::endl;
