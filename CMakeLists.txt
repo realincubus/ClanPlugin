@@ -61,6 +61,9 @@ add_llvm_loadable_module(
   MemoryAccess.cpp
   Scop.cpp
   ScopStmt.cpp
+  PetPlutoInterface.cpp
+  pluto_compat.cpp
+  ClangPetInterface.cpp
 )
 
 target_link_libraries( 
