@@ -19,6 +19,7 @@
 #include "clang/AST/ASTContext.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
+#include "clang/Lex/Preprocessor.h"
 #include "llvm/Support/raw_ostream.h"
 
 // std
@@ -28,6 +29,7 @@
 #include <map>
 #include <string>
 #include <memory>
+#include <mutex>
 
 #include "PetPlutoInterface.hpp"
 #include "ClangPetInterface.hpp"
@@ -100,13 +102,120 @@ class Callback : public MatchFinder::MatchCallback {
      bool write_cloog_file;
 };
 
+
+// return everything beginnign with l to the end of the line
+static std::string getText( SourceLocation l, SourceManager& SM ) {
+
+  bool invalid;
+  const char* data = SM.getCharacterData( l, &invalid ) ;
+
+  if ( !invalid ) {
+     const char* line_end = strchr(data, '\n');
+     if ( !line_end ) 
+       return data;
+     return std::string(data, line_end - data);
+  }
+
+  return "invalid";
+}
+
+
+// used to track what the preprocessor does when it enters the separate files
+class PPEnterCallback : public clang::PPCallbacks {
+public:
+    PPEnterCallback ( clang::SourceManager& _SM) :
+      SM(_SM)
+    {
+    }
+
+    std::string parseHeaderName( std::string include_stmt ) {
+      // skip " " to first char 
+      // check for < or " 
+      // search for corresponding closing char
+    
+      bool local_include = false;
+      bool global_include = false;
+      bool skip = true;
+      std::string name = "";
+
+      for (int i = 0; i < include_stmt.size(); ++i){
+	char c = include_stmt[i];
+
+	if ( skip && isWhitespace( std::isspace( c ) ) ) continue;
+	if ( c == '"' ) {
+	  local_include = true;
+	  skip = false;
+	  continue;
+	}
+	if ( c == '<' ) {
+	  global_include = true;
+	  skip = false;
+	  continue;
+	}
+
+	if ( local_include && c == '"' ) {
+	  break;
+	}
+
+	if ( global_include && c == '>' ) {
+	  break;
+	}
+
+	name += c;
+
+      }
+
+      return name;
+
+    }
+
+    virtual void FileChanged( SourceLocation Loc, FileChangeReason Reason, SrcMgr::CharacteristicKind FileType, FileID PrevFID=FileID() ) {
+      if ( Reason == EnterFile ) {
+	auto file_begin = Loc;
+	auto iloc = SM.getIncludeLoc( SM.getFileID(file_begin) );
+	auto text = getText( iloc, SM );
+	if ( text != "invalid" ) {
+	  std::cerr << "preprocessor " << text << std::endl;
+	  auto name = parseHeaderName( text );
+	  std::cerr << "preprocessor parsed name " << name << std::endl;
+	  // TODO this can happen in parallel lock it with a mutex 
+	  std::lock_guard<std::mutex> lock(getMutex());
+	  getHeaderSet().insert( name );
+	}
+      }
+    }
+
+    std::mutex& getMutex( ){
+      static std::mutex header_mutex;
+      return header_mutex;
+    }
+    // as a first step simply store the header names 
+    // TODO add the positions in which they were included
+    std::set<std::string>& getHeaderSet(){
+      static std::set<std::string> headers;
+      return headers;
+    }
+
+private:
+
+    clang::SourceManager& SM;
+
+};
+
+
+
+
+
+
+
 class ForLoopConsumer : public ASTConsumer {
 public:
 
   
-  ForLoopConsumer( CodeGenerationType _emit_code_type, bool _write_cloog_file) :
+  ForLoopConsumer( CodeGenerationType _emit_code_type, bool _write_cloog_file, PPEnterCallback* callbacks ) :
     emit_code_type(_emit_code_type),
-    write_cloog_file(_write_cloog_file)
+    write_cloog_file(_write_cloog_file),
+    enter_callback( callbacks )
   { 
     std::cerr << "for loop consumer created " << this << std::endl;
   }
@@ -150,8 +259,27 @@ public:
     std::cerr << "plugin: time consumption " << diff.count() << " s" << std::endl;
   }
 
+  bool isHeaderAlreadyIncluded( std::string header, ASTContext& clang_ctx ) {
+
+    std::lock_guard<std::mutex> lock(enter_callback->getMutex());
+    std::cerr << "plugin: number of already included headers " << enter_callback->getHeaderSet().size() << std::endl;
+    for( auto& included_header : enter_callback->getHeaderSet() ){
+      std::cerr << "comparing: " << included_header << " with " << header  << std::endl;
+      if ( header == included_header ) {
+	std::cerr << "plugin: header is already included" << std::endl;
+	return true;
+      }
+    }
+
+    return false;
+  }
+
+
   void add_missing_includes(Callback& Fixer, ASTContext& clang_ctx) {
     for( auto& header : Fixer.header_includes ){
+
+      if ( isHeaderAlreadyIncluded( header, clang_ctx ) ) continue;
+
       // TODO dont add if the header is already included
       // TODO skip the lines that begin with a comment 
       //      this way its possible to skip licences that are mostly at the beginning of a file
@@ -172,6 +300,7 @@ public:
 private: 
   CodeGenerationType emit_code_type;
   bool write_cloog_file;
+  PPEnterCallback* enter_callback;
 
 };
 
@@ -206,6 +335,30 @@ protected:
 
 };
 
+
+
+PPEnterCallback* setupCallbacks( CompilerInstance& CI ) {
+
+  if ( CI.hasPreprocessor() ) {
+    auto& pp = CI.getPreprocessor(); 
+    std::cerr << "plugin: got the preprocessor" << std::endl;
+
+    if ( CI.hasSourceManager() ) {
+      auto& SM = CI.getSourceManager();
+
+      std::unique_ptr<PPCallbacks> base_ptr( new PPEnterCallback(SM) );
+      auto* ret = (PPEnterCallback*)base_ptr.get();
+      pp.addPPCallbacks( std::move( base_ptr ) );
+    
+      return ret;
+    }
+
+    }else{
+    std::cerr << "ci does not have a preprocessor"  << std::endl;
+  }
+  return nullptr;
+}
+
 std::unique_ptr<ASTConsumer> 
 ClanAction::CreateASTConsumer(CompilerInstance &CI, llvm::StringRef){
   if ( redirect_stdout_file != "" ) {
@@ -227,9 +380,13 @@ ClanAction::CreateASTConsumer(CompilerInstance &CI, llvm::StringRef){
     }     
   }
   std::cerr << "makeing new Consumer object with compiler instance " << &CI << std::endl;
-  auto ret =  llvm::make_unique<ForLoopConsumer>(emit_code_type, write_cloog_file);
-  std::cerr << "at load ci " << ret.get() << " instance " << &CI << " ast context " << &CI.getASTContext() << " sm " << &CI.getSourceManager() << std::endl;
+  auto enter_callback = setupCallbacks( CI );
+  auto ret =  llvm::make_unique<ForLoopConsumer>(emit_code_type, write_cloog_file, enter_callback);
+  std::cerr << "at load ci " << ret.get() << " instance " << &CI << " ast context " << &CI.getASTContext() << " SM " << &CI.getSourceManager() << std::endl;
   std::cerr << "done with the new consumer object" << std::endl;
+
+  // TODO find all header includs in the main file and pass them to the ForLoopConsumer
+
   return std::move(ret);
 }
 

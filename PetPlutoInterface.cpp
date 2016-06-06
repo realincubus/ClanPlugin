@@ -308,6 +308,8 @@ PlutoProg* PetPlutoInterface::compute_deps(
   dependences.make_pluto_compatible( rename_table, pluto_compat_data );
 
 
+  //dependency_analysis_style = DependencyAnalysisType::Pluto;
+
   if ( dependency_analysis_style == DependencyAnalysisType::PollyLike ) {
     std::cerr << "plugin: calling pluto_compute_deps" << std::endl;
     // TODO the kill statements are not respected in isls dependency analysis 
@@ -326,6 +328,7 @@ PlutoProg* PetPlutoInterface::compute_deps(
 	pluto_compat_data.red 
     );
   }else{
+    std::cerr << "pet_pluto_interface: using pluto to calculate dependencies"  << std::endl;
     isl_union_map* schedule= isl_schedule_get_map(pscop->schedule);
     isl_union_map* read = pet_scop_collect_may_reads(pscop);
     isl_union_map* write = pet_scop_collect_must_writes(pscop);

@@ -13,7 +13,7 @@ isl_map* MemoryAccess::getAccessRelation(){
     return isl_map_from_union_map(pet_expr_access_get_may_read( expr ));
   }
   if ( pet_expr_access_is_write( expr ) ) {
-    return isl_map_from_union_map(pet_expr_access_get_may_write( expr ));
+    return isl_map_from_union_map(pet_expr_access_get_must_write( expr ));
   }
   return (isl_map*)nullptr;
 }
