@@ -25,16 +25,9 @@
 #include <fstream>
 #include <chrono>
 #include <iostream>
-#include <sstream>
 #include <map>
 #include <string>
-#include <thread>
 #include <memory>
-
-// internal
-//#include "stdlib_matchers.hpp"
-// TODO needed for setting the right flag but should be moved to PetPlutoInterface
-#include <pluto_codegen_cxx.hpp>
 
 #include "PetPlutoInterface.hpp"
 #include "ClangPetInterface.hpp"
@@ -70,12 +63,12 @@ class Callback : public MatchFinder::MatchCallback {
 	     pet_scop* scop = cp_interface.extract_scop( function_decl, call_texts );
 
 	     if ( scop ) {
+	       std::cerr << "found a valid scop" << std::endl;
 	       
 	       // TODO move to pet code
 	       // find the text of the original statement
 	       auto statement_texts = cp_interface.get_statement_texts( scop );
 
-	       std::cerr << "found a valid scop" << std::endl;
 	       // TODO move common variables into the ctor
 	       PetPlutoInterface pp_interface(header_includes, emit_code_type, write_cloog_file);
 	       if ( pp_interface.create_scop_replacement( scop, statement_texts, call_texts ) ){
@@ -207,7 +200,7 @@ protected:
   std::unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance &CI, llvm::StringRef) override;
   bool ParseArgs(const CompilerInstance &CI, const std::vector<std::string> &args) override;
   void PrintHelp(llvm::raw_ostream& ros) {
-    ros << "Help for Clan plugin goes here\n";
+    ros << "run the plugin with -emit-[openmp,openacc,hpx,tbb,cilk] to get different implementations for the loops\n";
   }
 
 

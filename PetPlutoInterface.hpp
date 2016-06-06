@@ -7,9 +7,6 @@
 #include <string>
 #include <map>
 #include <memory>
-#include "pet.h"
-#include "pet_cxx.h"
-#include "pluto_compat.h"
 #include "pluto_codegen_cxx.hpp"
 #include <libpluto.h>
 
@@ -23,6 +20,11 @@ enum class CodeGenerationType {
     TBB,
     CILK,
     HPX
+};
+
+enum class DependencyAnalysisType {
+    PollyLike,
+    Pluto
 };
 
 class PetPlutoInterface {
@@ -68,5 +70,7 @@ protected:
   bool write_cloog_file;
 
   std::string replacement;
+
+  DependencyAnalysisType dependency_analysis_style = DependencyAnalysisType::PollyLike;
 
 };

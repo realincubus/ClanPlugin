@@ -25,7 +25,8 @@ static __isl_give isl_map *tag(__isl_take isl_map *Relation,
 static __isl_give isl_map *tag(__isl_take isl_map *Relation, MemoryAccess *MA,
                                Dependences::AnalyisLevel TagLevel) {
   if (TagLevel == Dependences::AL_Reference)
-    return tag(Relation, MA->getArrayId());
+    // TODO changed this from getArrayId
+    return tag(Relation, MA->getId());
 
   if (TagLevel == Dependences::AL_Access)
     return tag(Relation, MA->getId());
@@ -63,17 +64,18 @@ Dependences::collectInfo(Scop &S, isl_union_map **Read, isl_union_map **Write,
     for (MemoryAccess& MA : *Stmt) {
       isl_set *domcp = Stmt->getDomain();
       isl_map *accdom = MA.getAccessRelation();
-      std::cerr << "dep anaylsis: dumping isl_union_map of accdom"  << std::endl;
       if ( !accdom ) {
 	continue;
       }
 
+      std::cerr << "dep anaylsis: dumping isl_union_map of accdom"  << std::endl;
       isl_map_dump( accdom );
+
       accdom = isl_map_intersect_domain(accdom, domcp);
       std::cerr << "after intersect with domain" << std::endl;
       isl_map_dump( accdom );
+      std::cerr << "done dumping: after intersect with domain" << std::endl;
 
-#if 1
       if (ReductionBaseValues.count(MA.getBaseAddr())) {
         // Wrap the access domain and adjust the schedule accordingly.
         //
@@ -95,23 +97,25 @@ Dependences::collectInfo(Scop &S, isl_union_map **Read, isl_union_map **Write,
 
         *AccessSchedule = isl_union_map_add_map(*AccessSchedule, Schedule);
       } else {
-#endif
+	std::cerr << "dep analysis: tagging accdom" << std::endl;
         accdom = tag(accdom, &MA, Level);
         if (Level > Dependences::AL_Statement) {
           isl_map *Schedule = tag(Stmt->getSchedule(), &MA, Level);
           *StmtSchedule = isl_union_map_add_map(*StmtSchedule, Schedule);
         }
-#if 1
       }
-#endif
-      // in contrast to llvm is nodes something from clang AST can be both  
+
+      std::cerr << "dep analysis: adding reads" << std::endl;
+      // in contrast to llvm nodes, something from clang AST can be both  
       if (MA.isRead()){
         *Read = isl_union_map_add_map(*Read, isl_map_copy(accdom));
       }
       
+      std::cerr << "dep analysis: adding writes" << std::endl;
       if (MA.isWrite()){
         *Write = isl_union_map_add_map(*Write, isl_map_copy(accdom));
       }
+      std::cerr << "dep analysis: done MA loop" << std::endl;
 
       // TODO i think i need to delete the accdom now
     }
@@ -123,9 +127,9 @@ Dependences::collectInfo(Scop &S, isl_union_map **Read, isl_union_map **Write,
   }
 
   // TODO i have no idea what this is about
-#if 0
+#if 1
   *StmtSchedule =
-      isl_union_map_intersect_params(*StmtSchedule, S.getAssumedContext());
+      isl_union_map_intersect_params(*StmtSchedule, isl_set_copy(S.getContext()));
 #endif
 
   *Read = isl_union_map_coalesce(*Read);

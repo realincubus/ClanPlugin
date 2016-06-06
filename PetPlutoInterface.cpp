@@ -2,6 +2,10 @@
 
 #include "PetPlutoInterface.hpp"
 #include "dependency_analysis.h"
+#include "pluto_codegen_cxx.hpp"
+#include "pluto_compat.h"
+#include "pet_cxx.h"
+#include "pet.h"
 
 #include <chrono>
 #include <iostream>
@@ -304,22 +308,64 @@ PlutoProg* PetPlutoInterface::compute_deps(
   dependences.make_pluto_compatible( rename_table, pluto_compat_data );
 
 
-  std::cerr << "plugin: calling pluto_compute_deps" << std::endl;
-  // TODO the kill statements are not respected in isls dependency analysis 
-  //      this needs to be taken into account in order to make scoped variables work like expected
-  return pluto_compute_deps( 
-      pluto_compat_data.schedule, 
-      pluto_compat_data.reads, 
-      pluto_compat_data.writes, 
-      pluto_compat_data.empty, 
-      pluto_compat_data.domains, 
-      pluto_compat_data.context, 
-      options, 
-      pluto_compat_data.raw,  
-      pluto_compat_data.war,  
-      pluto_compat_data.waw,  
-      pluto_compat_data.red 
-      );
+  if ( dependency_analysis_style == DependencyAnalysisType::PollyLike ) {
+    std::cerr << "plugin: calling pluto_compute_deps" << std::endl;
+    // TODO the kill statements are not respected in isls dependency analysis 
+    //      this needs to be taken into account in order to make scoped variables work like expected
+    return pluto_compute_deps( 
+	pluto_compat_data.schedule, 
+	pluto_compat_data.reads, 
+	pluto_compat_data.writes, 
+	pluto_compat_data.empty, 
+	pluto_compat_data.domains, 
+	pluto_compat_data.context, 
+	options, 
+	pluto_compat_data.raw,  
+	pluto_compat_data.war,  
+	pluto_compat_data.waw,  
+	pluto_compat_data.red 
+    );
+  }else{
+    isl_union_map* schedule= isl_schedule_get_map(pscop->schedule);
+    isl_union_map* read = pet_scop_collect_may_reads(pscop);
+    isl_union_map* write = pet_scop_collect_must_writes(pscop);
+    isl_union_map* empty = isl_union_map_empty(isl_set_get_space(pscop->context));
+    isl_set* context = isl_set_copy(pscop->context);
+
+    auto space = isl_set_get_space( pscop->context );
+
+    if ( rename_table.size() > 0 ) {
+      domains = linearize_union_set( space, domains, rename_table );
+      schedule = linearize_union_map( space, schedule, rename_table );
+      read = linearize_union_map( space, read, rename_table );
+      write = linearize_union_map( space, write, rename_table );
+      empty = linearize_union_map( space, empty, rename_table );
+    }
+
+    reduction_variables_for_tuple_names.clear();
+
+    domains = add_extra_infos_to_ids( 
+      isl_set_get_space(pscop->context),  
+      domains, 
+      statement_texts, 
+      call_texts,
+      reduction_variables_for_tuple_names
+    );
+
+    return pluto_compute_deps( schedule,
+			       read,
+			       write,
+			       empty,
+			       domains,
+			       context,
+			       options,
+			       nullptr,
+			       nullptr,
+			       nullptr,
+			       nullptr
+    );
+  }
+
 }
 
 

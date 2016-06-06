@@ -31,7 +31,10 @@ bool MemoryAccess::isReductionLike() {
 
 
 isl_id* MemoryAccess::getBaseAddr() {
-  return pet_expr_access_get_id( expr );
+  std::cerr << "MemoryAccess get the id" << std::endl;
+  auto ret = pet_expr_access_get_id( expr );
+  std::cerr << "done MemoryAccess get the id" << std::endl;
+  return ret;
 }
 
 
