@@ -3,8 +3,11 @@
 #include <string>
 #include <vector>
 #include <functional>
+#include <memory>
 
-class ScopStmt;
+#include "ScopStmt.hpp"
+
+//class ScopStmt;
 class MemoryAccess;
 
 struct pet_scop;
@@ -48,7 +51,7 @@ private:
 
 
     pet_scop* scop;
-    std::vector<ScopStmt*> scop_stmts;
+    std::vector<std::unique_ptr<ScopStmt>> scop_stmts;
 };
 
 

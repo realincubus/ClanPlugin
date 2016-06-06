@@ -36,7 +36,7 @@ using pluto_codegen_cxx::StatementInformation;
 
 PetPlutoInterface::PetPlutoInterface( 
     std::set<std::string>& _header_includes, 
-    pluto_codegen_cxx::EMIT_CODE_TYPE _emit_code_type, 
+    CodeGenerationType _emit_code_type, 
     bool _write_cloog_file 
   ) : 
   header_includes(_header_includes),
@@ -329,6 +329,24 @@ PlutoProg* PetPlutoInterface::pet_to_pluto_prog(pet_scop* scop, PlutoOptions* pl
   return prog;
 }
 
+static pluto_codegen_cxx::EMIT_CODE_TYPE to_pluto_emit_type( CodeGenerationType cgt ) {
+  if ( cgt == CodeGenerationType::ACC ) {
+    return pluto_codegen_cxx::EMIT_ACC;
+  }
+  if ( cgt == CodeGenerationType::OMP ) {
+    return pluto_codegen_cxx::EMIT_OPENMP;
+  }
+  if ( cgt == CodeGenerationType::CILK ) {
+    return pluto_codegen_cxx::EMIT_CILK;
+  }
+  if ( cgt == CodeGenerationType::TBB ) {
+    return pluto_codegen_cxx::EMIT_TBB;
+  }
+  if ( cgt == CodeGenerationType::HPX ) {
+    return pluto_codegen_cxx::EMIT_HPX;
+  }
+}
+
 bool PetPlutoInterface::create_scop_replacement(  
     pet_scop* scop, 
     std::vector<std::string>& statement_texts,
@@ -391,7 +409,7 @@ bool PetPlutoInterface::create_scop_replacement(
   std::stringstream outfp;
   auto begin_codegen = std::chrono::high_resolution_clock::now();
 
-  if ( pluto_codegen_cxx::pluto_multicore_codegen( outfp, prog, statement_texts, emit_code_type, write_cloog_file, *call_texts, header_includes ) == EXIT_FAILURE ) {
+  if ( pluto_codegen_cxx::pluto_multicore_codegen( outfp, prog, statement_texts, to_pluto_emit_type(emit_code_type), write_cloog_file, *call_texts, header_includes ) == EXIT_FAILURE ) {
     // stop if codegeneration failed
     return "";
   }

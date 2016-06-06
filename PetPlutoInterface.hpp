@@ -16,11 +16,20 @@
 struct isl_union_set;
 struct pet_scop;
 
+
+enum class CodeGenerationType {
+    ACC,
+    OMP,
+    TBB,
+    CILK,
+    HPX
+};
+
 class PetPlutoInterface {
 public:
     PetPlutoInterface (
 	std::set<std::string>& _header_includes, 
-	pluto_codegen_cxx::EMIT_CODE_TYPE _emit_code_type, 
+	CodeGenerationType _emit_code_type, 
 	bool _write_cloog_file
     ); 
     virtual ~PetPlutoInterface () {}
@@ -53,8 +62,9 @@ protected:
     std::unique_ptr<std::map<std::string,std::string>>& call_texts 
   );
 
+
   std::set<std::string>& header_includes;
-  pluto_codegen_cxx::EMIT_CODE_TYPE emit_code_type;
+  CodeGenerationType emit_code_type;
   bool write_cloog_file;
 
   std::string replacement;

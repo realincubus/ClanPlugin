@@ -2,12 +2,22 @@ CMAKE_MINIMUM_REQUIRED(VERSION 2.6)
 PROJECT(OptimizerPlugin)
 
 SET( CMAKE_BUILD_TYPE RELEASE )
+SET( CMAKE_EXPORT_COMPILATION_DATABASE on )
 
-#SET( CMAKE_C_FLAGS "${CMAKE_C_FLAGS}" )
-#SET( CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -Wall -pedantic" )
-SET( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DCLANG_ENABLE_ARCMT -DCLANG_ENABLE_OBJC_REWRITER -DCLANG_ENABLE_STATIC_ANALYZER -std=c++14 -fvisibility-inlines-hidden -ffunction-sections -fdata-sections -fno-common -fno-strict-aliasing -Wl,--version-script,${CMAKE_SOURCE_DIR}/ClanPlugin.exports" )
-#SET( CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} ${CMAKE_C_FLAGS_DEBUG}" )
-#SET( CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}" )
+SET( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DCLANG_ENABLE_ARCMT -DCLANG_ENABLE_OBJC_REWRITER -DCLANG_ENABLE_STATIC_ANALYZER -std=c++14 -fvisibility-inlines-hidden -ffunction-sections -fdata-sections -fno-common -fno-strict-aliasing -Wl,--version-script,${CMAKE_SOURCE_DIR}/ClanPlugin.exports")
+
+# if enabled tries to build everything with module support # seams to be buggy
+# does not work with anything else than clang
+if ( USE_MODULES )
+  SET(  CMAKE_CXX_FLAGS 
+    ${CMAKE_CXX_FLAGS} 
+    -fmodules 
+    -fno-implicit-module-maps 
+    -fmodule-map-file=${CMAKE_SOURCE_DIR}/module.modulemap 
+    -fmodules-cache-path=${CMAKE_SOURCE_DIR}/cache 
+    -fmodules-decluse 
+  )
+endif()
 
 # put all libraries into a lib folder
 SET(LIBRARY_OUTPUT_PATH ${PROJECT_BINARY_DIR}/lib)

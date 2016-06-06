@@ -47,7 +47,7 @@ namespace {
 
 class Callback : public MatchFinder::MatchCallback {
   public:
-    Callback ( pluto_codegen_cxx::EMIT_CODE_TYPE _emit_code_type, bool _write_cloog_file ) :
+    Callback ( CodeGenerationType _emit_code_type, bool _write_cloog_file ) :
       emit_code_type(_emit_code_type),
       write_cloog_file(_write_cloog_file)
     {
@@ -103,7 +103,7 @@ class Callback : public MatchFinder::MatchCallback {
      std::set<std::string> header_includes;
 
   private:
-     pluto_codegen_cxx::EMIT_CODE_TYPE emit_code_type;
+     CodeGenerationType emit_code_type;
      bool write_cloog_file;
 };
 
@@ -111,7 +111,7 @@ class ForLoopConsumer : public ASTConsumer {
 public:
 
   
-  ForLoopConsumer( pluto_codegen_cxx::EMIT_CODE_TYPE _emit_code_type, bool _write_cloog_file) :
+  ForLoopConsumer( CodeGenerationType _emit_code_type, bool _write_cloog_file) :
     emit_code_type(_emit_code_type),
     write_cloog_file(_write_cloog_file)
   { 
@@ -177,7 +177,7 @@ public:
 #endif
 
 private: 
-  pluto_codegen_cxx::EMIT_CODE_TYPE emit_code_type;
+  CodeGenerationType emit_code_type;
   bool write_cloog_file;
 
 };
@@ -196,114 +196,112 @@ class ClanAction : public PluginASTAction {
       std::cerr << "clang action " << this << " destroyed " << std::endl;
     }
 
-  //std::set<std::string> ParsedTemplates;
 protected:
 
-
-  pluto_codegen_cxx::EMIT_CODE_TYPE emit_code_type = pluto_codegen_cxx::EMIT_ACC;
+  CodeGenerationType emit_code_type = CodeGenerationType::ACC;
   bool write_cloog_file = false;
   std::string redirect_stdout_file = "";
   std::string redirect_stderr_file = "";
-  std::string* next_arg = nullptr;
 
   // NOTE: stefan this creates the consumer that is given the TU after everything is done
-  std::unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance &CI,
-                                                 llvm::StringRef) override {
-    if ( redirect_stdout_file != "" ) {
-      std::cout << "redirect_stdout_file " << redirect_stdout_file << std::endl;
-      // TODO mutex
-      if ( once_std_out ) {
-	std::freopen(redirect_stdout_file.c_str(), "a", stdout);
-	setvbuf ( stdout , NULL , _IOLBF , 1024 );
-	once_std_out = false;
-      }     
-    }
-    if ( redirect_stderr_file != "" ) {
-      std::cout << "redirect_stderr_file " << redirect_stderr_file << std::endl;
-      // TODO mutex
-      if ( once_std_err ) {
-	std::freopen(redirect_stderr_file.c_str(), "a", stderr);
-	setvbuf ( stderr , NULL , _IOLBF , 1024 );
-	once_std_err = false;
-      }     
-    }
-    std::cerr << "makeing new Consumer object with compiler instance " << &CI << std::endl;
-    auto ret =  llvm::make_unique<ForLoopConsumer>(emit_code_type, write_cloog_file);
-    std::cerr << "at load ci " << ret.get() << " instance " << &CI << " ast context " << &CI.getASTContext() << " sm " << &CI.getSourceManager() << std::endl;
-    std::cerr << "done with the new consumer object" << std::endl;
-    return std::move(ret);
-  }
-
-
+  std::unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance &CI, llvm::StringRef) override;
+  bool ParseArgs(const CompilerInstance &CI, const std::vector<std::string> &args) override;
   void PrintHelp(llvm::raw_ostream& ros) {
     ros << "Help for Clan plugin goes here\n";
-  }
-
-  // TODO add instructions on how to do that
-  // #stefan: here one can parse some arugments for this plugin
-  bool ParseArgs(const CompilerInstance &CI,
-                 const std::vector<std::string> &args) override {
-
-    for (unsigned i = 0, e = args.size(); i != e; ++i) {
-      llvm::errs() << "Clan arg = " << args[i] << "\n";
-
-      if ( next_arg ) {
-	*next_arg = args[i];
-	next_arg = nullptr;
-	continue;
-      }
-
-      if ( args[i] == "-emit-openacc" ) {
-	std::cerr << "emiting openacc" << std::endl;
-	emit_code_type = pluto_codegen_cxx::EMIT_ACC;
-      }
-
-      if ( args[i] == "-emit-openmp" ) {
-	std::cerr << "emiting openmp" << std::endl;
-	emit_code_type = pluto_codegen_cxx::EMIT_OPENMP;
-      }
-
-      if ( args[i] == "-emit-hpx" ) {
-	std::cerr << "emiting hpx" << std::endl;
-	emit_code_type = pluto_codegen_cxx::EMIT_HPX;
-      }
-
-      if ( args[i] == "-emit-tbb" ) {
-	std::cerr << "emiting tbb" << std::endl;
-	emit_code_type = pluto_codegen_cxx::EMIT_TBB;
-      }
-
-      if ( args[i] == "-emit-cilk" ) {
-	std::cerr << "emiting cilk" << std::endl;
-	emit_code_type = pluto_codegen_cxx::EMIT_CILK;
-      }
-
-      // add new back-ends here 
-
-      if ( args[i] == "-write-cloog-file" ) {
-	std::cerr << "writing cloog file" << std::endl;
-	write_cloog_file = true;
-      }
-
-      if ( args[i] == "-redirect-stdout" ) {
-	std::cerr << "redirecting stdout" << std::endl;
-	next_arg = &redirect_stdout_file;
-      }
-
-      if ( args[i] == "-redirect-stderr" ) {
-	std::cerr << "redirecting stderr" << std::endl;
-	next_arg = &redirect_stderr_file;
-      }
-
-    }
-
-    return true;
   }
 
 
 };
 
+std::unique_ptr<ASTConsumer> 
+ClanAction::CreateASTConsumer(CompilerInstance &CI, llvm::StringRef){
+  if ( redirect_stdout_file != "" ) {
+    std::cout << "redirect_stdout_file " << redirect_stdout_file << std::endl;
+    // TODO mutex
+    if ( once_std_out ) {
+      std::freopen(redirect_stdout_file.c_str(), "a", stdout);
+      setvbuf ( stdout , NULL , _IOLBF , 1024 );
+      once_std_out = false;
+    }     
+  }
+  if ( redirect_stderr_file != "" ) {
+    std::cout << "redirect_stderr_file " << redirect_stderr_file << std::endl;
+    // TODO mutex
+    if ( once_std_err ) {
+      std::freopen(redirect_stderr_file.c_str(), "a", stderr);
+      setvbuf ( stderr , NULL , _IOLBF , 1024 );
+      once_std_err = false;
+    }     
+  }
+  std::cerr << "makeing new Consumer object with compiler instance " << &CI << std::endl;
+  auto ret =  llvm::make_unique<ForLoopConsumer>(emit_code_type, write_cloog_file);
+  std::cerr << "at load ci " << ret.get() << " instance " << &CI << " ast context " << &CI.getASTContext() << " sm " << &CI.getSourceManager() << std::endl;
+  std::cerr << "done with the new consumer object" << std::endl;
+  return std::move(ret);
 }
+
+bool 
+ClanAction::ParseArgs(const CompilerInstance &CI, const std::vector<std::string> &args)  {
+  std::string* next_arg = nullptr;
+
+  for (unsigned i = 0, e = args.size(); i != e; ++i) {
+    llvm::errs() << "Clan arg = " << args[i] << "\n";
+
+    if ( next_arg ) {
+      *next_arg = args[i];
+      next_arg = nullptr;
+      continue;
+    }
+
+    if ( args[i] == "-emit-openacc" ) {
+      std::cerr << "emiting openacc" << std::endl;
+      emit_code_type = CodeGenerationType::ACC;
+    }
+
+    if ( args[i] == "-emit-openmp" ) {
+      std::cerr << "emiting openmp" << std::endl;
+      emit_code_type = CodeGenerationType::OMP;
+    }
+
+    if ( args[i] == "-emit-hpx" ) {
+      std::cerr << "emiting hpx" << std::endl;
+      emit_code_type = CodeGenerationType::HPX;
+    }
+
+    if ( args[i] == "-emit-tbb" ) {
+      std::cerr << "emiting tbb" << std::endl;
+      emit_code_type = CodeGenerationType::TBB;
+    }
+
+    if ( args[i] == "-emit-cilk" ) {
+      std::cerr << "emiting cilk" << std::endl;
+      emit_code_type = CodeGenerationType::CILK;
+    }
+
+    // add new back-ends here 
+
+    if ( args[i] == "-write-cloog-file" ) {
+      std::cerr << "writing cloog file" << std::endl;
+      write_cloog_file = true;
+    }
+
+    if ( args[i] == "-redirect-stdout" ) {
+      std::cerr << "redirecting stdout" << std::endl;
+      next_arg = &redirect_stdout_file;
+    }
+
+    if ( args[i] == "-redirect-stderr" ) {
+      std::cerr << "redirecting stderr" << std::endl;
+      next_arg = &redirect_stderr_file;
+    }
+
+  }
+
+  return true;
+}
+
+
+} // namespace end
 
 static FrontendPluginRegistry::Add<ClanAction>
 X("clan", "run clan as part of the compiler");

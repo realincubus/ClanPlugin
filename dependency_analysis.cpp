@@ -53,13 +53,13 @@ Dependences::collectInfo(Scop &S, isl_union_map **Read, isl_union_map **Write,
 #if 1
   std::set<const isl_id *> ReductionBaseValues;
   if (UseReductions)
-    for (ScopStmt *Stmt : S)
+    for (auto& Stmt : S)
       for (MemoryAccess& MA : *Stmt)
         if (MA.isReductionLike())
           ReductionBaseValues.insert(MA.getBaseAddr());
 #endif
 
-  for (ScopStmt *Stmt : S) {
+  for (auto& Stmt : S) {
     for (MemoryAccess& MA : *Stmt) {
       isl_set *domcp = Stmt->getDomain();
       isl_map *accdom = MA.getAccessRelation();
@@ -368,7 +368,7 @@ void Dependences::calculateDependences( Scop& S ){
 
   // Step 1)
   RED = isl_union_map_empty(isl_union_map_get_space(RAW));
-  for (ScopStmt *Stmt : S) {
+  for (auto& Stmt : S) {
     for (MemoryAccess& MA : *Stmt) {
       if (!MA.isReductionLike())
         continue;
@@ -415,7 +415,7 @@ void Dependences::calculateDependences( Scop& S ){
   // We then move this portion of reduction dependences back to the statement ->
   // statement space and add a mapping from the memory access to these
   // dependences.
-  for (ScopStmt *Stmt : S) {
+  for (auto& Stmt : S) {
     for (MemoryAccess& MA : *Stmt) {
       if (!MA.isReductionLike())
         continue;
@@ -638,7 +638,7 @@ Scop::getAccessesOfType(std::function<bool(MemoryAccess &)> Predicate) {
 
   std::cerr << "depana: " << __PRETTY_FUNCTION__ << std::endl;
 
-  for (ScopStmt *Stmt : *this) {
+  for (auto& Stmt : *this) {
     for (MemoryAccess& MA : *Stmt) {
       if (!Predicate(MA))
         continue;
@@ -713,7 +713,7 @@ std::vector<PetReductionVariableInfo> Dependences::find_reduction_variables( ){
 	  exit(-1);
 	}
 
-	ScopStmt* s = dependences->scop.getStmtByTupleName( in_name );
+	auto* s = dependences->scop.getStmtByTupleName( in_name );
 	if ( s ) {
 	  std::cerr << "depana: found the corresponding statement"  << std::endl;
 	  for( auto& MA : *s ){
