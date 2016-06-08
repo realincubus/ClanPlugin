@@ -40,6 +40,7 @@ public:
     isl_schedule* getSchedule();
     isl_schedule* getScheduleTree();
     ScopStmt* getStmtByTupleName( std::string name );
+    isl_union_map* getKillStatements();
 
     isl_union_map* getAccessesOfType(std::function<bool(MemoryAccess &)> Predicate);
     isl_union_map* getMustWrites();

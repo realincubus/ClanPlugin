@@ -5,6 +5,8 @@
 #include "MemoryAccess.hpp"
 #include "ScopStmt.hpp"
 
+#include <isl/schedule_node.h>
+
 #include <iostream>
 
 
@@ -43,6 +45,7 @@ Dependences::collectInfo(Scop &S, isl_union_map **Read, isl_union_map **Write,
                         isl_union_map **MayWrite,
                         isl_union_map **AccessSchedule,
                         isl_union_map **StmtSchedule,
+			isl_union_map **KillStatements,
                         Dependences::AnalyisLevel Level) {
   isl_space *Space = S.getParamSpace();
   *Read = isl_union_map_empty(isl_space_copy(Space));
@@ -132,6 +135,9 @@ Dependences::collectInfo(Scop &S, isl_union_map **Read, isl_union_map **Write,
       isl_union_map_intersect_params(*StmtSchedule, isl_set_copy(S.getContext()));
 #endif
 
+  *KillStatements = S.getKillStatements();
+
+  *KillStatements = isl_union_map_coalesce( *KillStatements );
   *Read = isl_union_map_coalesce(*Read);
   *Write = isl_union_map_coalesce(*Write);
   *MayWrite = isl_union_map_coalesce(*MayWrite);
@@ -144,6 +150,8 @@ Dependences::collectInfo(Scop &S, isl_union_map **Read, isl_union_map **Write,
   isl_union_map_dump( *MayWrite );
   std::cerr << "schedule" << std::endl;
   isl_union_map_dump( *StmtSchedule );
+  std::cerr << "kill statements" << std::endl;
+  isl_union_map_dump( *KillStatements );
 }
 
 #define DEBUG(x) 
@@ -199,11 +207,19 @@ addZeroPaddingToSchedule(__isl_take isl_union_map *Schedule) {
 void Dependences::calculateDependences( Scop& S ){
   isl_union_map *Read, *Write, *MayWrite, *AccessSchedule, *StmtSchedule;
   isl_schedule *Schedule;
+  isl_union_map* KillStatements;
 
   DEBUG(dbgs() << "Scop: \n" << S << "\n");
 
-  collectInfo(S, &Read, &Write, &MayWrite, &AccessSchedule, &StmtSchedule,
-              Level);
+  collectInfo(S, 
+      &Read, 
+      &Write, 
+      &MayWrite, 
+      &AccessSchedule, 
+      &StmtSchedule, 
+      &KillStatements, 
+      Level
+  );
 
   DEBUG(dbgs() << "Read: " << Read << '\n';
         dbgs() << "Write: " << Write << '\n';
@@ -280,6 +296,9 @@ void Dependences::calculateDependences( Scop& S ){
     // improve performance.
     WAR = isl_union_map_subtract(WAR, isl_union_map_copy(WAW));
 
+    if ( OptKillStatementAnalysis ) {
+      WAR = considerKillStatements( WAR, Schedule, Write, KillStatements ) ;
+    }
 
     isl_union_flow_free(Flow);
     isl_schedule_free(Schedule);
@@ -746,3 +765,304 @@ std::vector<PetReductionVariableInfo> Dependences::find_reduction_variables( ){
   return reduction_variables;
 
 }
+
+typedef std::pair<isl_set*, isl_schedule_node*> find_result;
+
+static isl_bool find_set_in_schedule( isl_schedule_node* node, void* user ) {
+
+  find_result* fr = (find_result*)user;
+  isl_set* set = fr->first;
+
+  auto type = isl_schedule_node_get_type( node );
+  if ( type == isl_schedule_node_filter  ) {
+    //isl_schedule_node_dump( node );
+
+
+    isl_union_set* filter = isl_schedule_node_filter_get_filter( node );
+    //std::cerr << "filter: " << std::endl;
+    //isl_union_set_dump( filter );
+    // skip all filter nodes with more than one set
+    if ( isl_union_set_n_set( filter ) == 1 ) {
+      auto* result = isl_union_set_intersect( isl_union_set_from_set(isl_set_copy(set)), filter );
+      if ( isl_union_set_is_empty( result ) ){
+	isl_union_set_free( result );
+	std::cerr << "this set does not contain this set" << std::endl;
+      }else{
+	isl_union_set_free( result );
+	std::cerr << "this set DOES contain this set" << std::endl;
+	fr->second = isl_schedule_node_copy(node);
+	// stop recursing
+	return (isl_bool)0;
+      }
+    }else{
+      std::cerr << "not considering this node since it has to have subnodes" << std::endl;
+    }
+  }
+  return (isl_bool)1; 
+}
+
+// TODO get the position in the schedule
+static isl_schedule_node* getScheduleNode( isl_schedule* schedule, isl_set* set ) {
+  std::cerr << "searching for :" << std::endl;
+  isl_set_dump( set );
+  find_result f = std::make_pair( set, nullptr );
+  isl_schedule_foreach_schedule_node_top_down( schedule, &find_set_in_schedule, &f );
+  return f.second;
+}
+
+static isl_set* get_source_from_map( isl_map* map ) {
+  std::cerr << "source: " << std::endl;
+  isl_set* set = isl_map_domain( map );
+  isl_set_dump( set );
+  return set;
+  
+}
+
+static isl_set* get_destination_from_map ( isl_map* map ) {
+  std::cerr << "destination: " << std::endl;
+  isl_set* set = isl_map_range( map );
+  isl_set_dump( set );
+  return set;
+}
+
+typedef std::tuple<isl_schedule_node*, isl_schedule_node*, bool, bool> find_node_data;
+
+static isl_bool find_nodes( isl_schedule_node* node, void* user ) {
+  find_node_data* fnd = (find_node_data*) user;
+  isl_schedule_node* a = std::get<0>(*fnd);
+  isl_schedule_node* b = std::get<1>(*fnd);
+  bool& is_before = std::get<2>(*fnd);
+  bool& a_found = std::get<3>(*fnd);
+
+#if 0
+  std::cerr << "a node" << std::endl;
+  isl_schedule_node_dump( a ) ;
+
+  std::cerr << "b node" << std::endl;
+  isl_schedule_node_dump( b ) ;
+
+  std::cerr << "n node" << std::endl;
+  isl_schedule_node_dump( node ) ;
+#endif
+
+  if ( !a_found && isl_schedule_node_is_equal(node,a)  ) {
+    a_found = true;
+    std::cerr << "a found" << std::endl;
+    return (isl_bool)1;
+  }
+
+  if ( a_found && isl_schedule_node_is_equal(node,b) ) {
+    is_before = true;
+    std::cerr << "b found" << std::endl;
+  }
+
+  return (isl_bool)1;
+}
+
+static bool is_before( isl_schedule* schedule, isl_schedule_node* a, isl_schedule_node* b ) {
+  find_node_data fnd = std::make_tuple( a, b, false, false );
+  isl_schedule_foreach_schedule_node_top_down( schedule, &find_nodes, &fnd );
+  return std::get<2>(fnd);
+}
+
+typedef std::tuple< 
+    isl_schedule_node*, // source
+    isl_schedule_node*, // destination
+    isl_union_map*,     // kill_statements
+    isl_set*,           // filter for the range 
+    bool,		// is_killed ?
+    bool		// source found ?
+    > KillStatementAnalysisData;
+
+static isl_bool find_kill_statement( isl_schedule_node* node, void* user ) {
+  auto ksad = (KillStatementAnalysisData*)user;
+
+  isl_union_set* filter = nullptr;
+
+  // check that we got a filter node 
+  auto type = isl_schedule_node_get_type( node );
+  if ( type == isl_schedule_node_filter  ) {
+    filter = isl_schedule_node_filter_get_filter( node );
+    // skip all filter nodes with more than one set
+    if ( isl_union_set_n_set( filter ) != 1 ) {
+      std::cerr << "skipping this filter node since it has to have children" << std::endl;
+      // recurse
+      return (isl_bool)1;
+    }
+  }else{
+    return (isl_bool)1;
+  }
+
+  // first find the source statement
+  isl_schedule_node* source_node = std::get<0>(*ksad);
+  bool& source_found = std::get<5>( *ksad );
+
+  if ( !source_found && isl_schedule_node_is_equal( node, source_node ) ) {
+    std::cerr << "found the source statement heading for the destination statement" << std::endl;
+    source_found = true;
+    // dont recurse -> kill stmt has to be in sequence
+    return (isl_bool)0;
+  }
+
+
+  bool& is_killed = std::get<4>( *ksad );
+#if 0
+  // now search for the destination statement 
+  // if we find it and it was not killed on route 
+  // we are sure everything is ok
+  if ( source_found && !is_killed && isl_schedule_node_is_equal( node, destination_node ) ){
+    // TODO do i need this ?? 
+  }
+#endif
+
+  // if the source was found
+  // check wether we touch a kill statement 
+  // and if this statement kills the range we are looking for 
+  // set the kill flag to true
+  if ( source_found && !is_killed ) {
+    std::cerr << "checking for killstatement " << std::endl;
+    isl_union_map* kill_statements = std::get<2>(*ksad);
+    std::cerr << "kill statements are: " << std::endl;
+    isl_union_map_dump( kill_statements );
+    std::cerr << "intersecting with filter: "<< std::endl;
+    isl_union_set_dump( filter );
+    isl_union_map* kills = isl_union_map_intersect_domain( isl_union_map_copy(kill_statements), filter ); 
+    std::cerr << "kills are:" << std::endl;
+    isl_union_map_dump( kills );
+
+    // check wether this statement is a kill_statement 
+    if ( !isl_union_map_is_empty( kills ) ){
+      // has to be one element
+      if ( isl_union_map_n_map( kills ) != 1 ) {
+	std::cerr << "union map has != 1 element cant handle this" << std::endl;
+	exit(-1);
+      }
+
+      isl_set* range = std::get<3>(*ksad);
+      std::cerr << "checking range:" << std::endl;
+      isl_set_dump( range );
+      isl_map* kill = isl_map_from_union_map( kills );
+      isl_set* kill_range = isl_map_range( kill );
+      std::cerr << "with kill range:"  << std::endl;
+      isl_set_dump( kill_range );
+      
+      // now check that both ranges are the same 
+      if ( isl_set_is_equal( range, kill_range ) ) {
+	std::cerr << "both ranges are identical setting is_killed true" << std::endl;
+	is_killed = true;
+	return (isl_bool)0;
+      }
+    }
+  }
+
+  return (isl_bool)1;
+
+}
+
+static bool is_killed( 
+    isl_schedule* schedule, 
+    isl_schedule_node* a,
+    isl_schedule_node* b,
+    isl_union_map* kill_statements, 
+    isl_set* range 
+){
+  std::cerr << __PRETTY_FUNCTION__ << std::endl;
+  // TODO intersect it with the kill statements on route from source to destination
+  KillStatementAnalysisData ksad = std::make_tuple( a, b, kill_statements, range, false, false );
+  // need to call this two times if source is after destination
+  isl_schedule_foreach_schedule_node_top_down( schedule, &find_kill_statement, &ksad );
+  isl_schedule_foreach_schedule_node_top_down( schedule, &find_kill_statement, &ksad );
+  return std::get<4>(ksad);
+}
+
+// the schedule, the write statements, the kill_statements ...
+typedef std::tuple< isl_schedule*, isl_union_map*, isl_union_map* > KillStatementsData;
+
+static isl_stat considerKillStatementsForMap( isl_map* map, void* user ) {
+
+  auto kill_statements_data = (KillStatementsData*)user;
+  isl_schedule* schedule = std::get<0>(*kill_statements_data);
+  isl_union_map* writes = std::get<1>(*kill_statements_data);
+  isl_union_map* kill_statements = std::get<2>(*kill_statements_data);
+
+  // i need source and targets from the map 
+  auto source = get_source_from_map( isl_map_copy(map) );
+  auto destination = get_destination_from_map( isl_map_copy(map) );
+
+  auto schedule_node_source = getScheduleNode( schedule, source );
+  auto schedule_node_destination = getScheduleNode( schedule, destination );
+
+  if ( !schedule_node_source ) {
+    std::cerr << "did not get schedule node for source" << std::endl;
+  }
+
+  if ( !schedule_node_destination ) {
+    std::cerr << "did not get schedule node for destination" << std::endl;
+  }
+
+  // the destination is the write statement in a write after read
+  isl_union_set* filter = isl_schedule_node_filter_get_filter( schedule_node_destination ); 
+
+  // get the entry from the writes 
+  isl_union_map* filtered_writes = isl_union_map_intersect_domain( isl_union_map_copy(writes), filter );
+  isl_union_map_dump( filtered_writes );
+
+  // since its possible that there are multiple writes in the same statement ( althoug c and c++ forbid this )
+  if ( isl_union_map_n_map( filtered_writes ) == 1 ) {  
+    isl_map* filtered_write = isl_map_from_union_map( filtered_writes );
+
+    // get the range from this map ( its the thing the statement is writing on )
+    isl_set* range = isl_map_range( filtered_write );
+    isl_set_dump ( range );
+
+    // if the source statement is before the destination statement its ok 
+    // but if its vice versa one has to check the kill statements 
+    if ( is_before( schedule, schedule_node_source, schedule_node_destination ) ) {
+      std::cerr << "destination is after source -> no next iter" << std::endl;
+    }else{
+      std::cerr << "destination is before source -> next iter" << std::endl;
+      bool isKilled = is_killed( 
+	  schedule, 
+	  schedule_node_source, 
+	  schedule_node_destination, 
+	  kill_statements, 
+	  range 
+      );
+
+      if ( isKilled ) {
+	std::cerr << "the write operation was killed by a kill statement on route to the destination"
+	 << " you can delete this dependency" << std::endl;
+      }
+    }
+
+  }else{
+    std::cerr << "can not handle multiple writes in one statement -> not implemented" << std::endl;
+    exit(-1);
+  }
+
+  return (isl_stat)0; 
+}
+
+isl_union_map* Dependences::considerKillStatements( isl_union_map* DEPS, 
+    isl_schedule* schedule, 
+    isl_union_map* writes, 
+    isl_union_map* kill_statements 
+){
+  std::cerr << __PRETTY_FUNCTION__ << " begin " << std::endl;
+  KillStatementsData ksd = std::make_tuple( schedule, writes, kill_statements );
+  // iterate over all dependencies
+  isl_union_map_foreach_map( DEPS , &considerKillStatementsForMap, &ksd );
+
+  std::cerr << __PRETTY_FUNCTION__ << " end " << std::endl;
+
+  return DEPS;
+}
+
+
+
+
+
+
+
+
+

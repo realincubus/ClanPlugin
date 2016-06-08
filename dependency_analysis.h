@@ -82,12 +82,14 @@ public:
 
     PlutoCompatData build_pluto_data( );
     PlutoCompatData make_pluto_compatible( std::vector<int>& rename_table, PlutoCompatData& pcd );
+    isl_union_map* considerKillStatements( isl_union_map*, isl_schedule*, isl_union_map*, isl_union_map* );
 
 
     void collectInfo(Scop& S, isl_union_map **Read, isl_union_map **Write,
                         isl_union_map **MayWrite,
                         isl_union_map **AccessSchedule,
                         isl_union_map **StmtSchedule,
+			isl_union_map **KillStatements,
                         Dependences::AnalyisLevel Level);
 
     isl_ctx* getContext( pet_scop* pscop );
@@ -118,6 +120,7 @@ public:
     int OptComputeOut = 500000;
 
     AnalysisType OptAnalysisType = VALUE_BASED_ANALYSIS;
+    bool OptKillStatementAnalysis = false;
 
     Scop scop;
     

@@ -63,3 +63,8 @@ isl_set* Scop::getContext(){
 isl_schedule* Scop::getSchedule(){
   return scop->schedule;
 }
+
+isl_union_map* 
+Scop::getKillStatements( ){
+  return pet_scop_collect_must_kills( scop );
+}

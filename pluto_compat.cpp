@@ -65,7 +65,15 @@ isl_union_set* linearize_union_set( isl_space* space, isl_union_set* domains, st
 	  assert(isdigit(name[2]));
 	  int id = atoi(&name[2]);
 
-	  sprintf( new_name, "S_%d", (*user_data->rename_table)[id] );
+	  std::vector<int>& rename_table = (*user_data->rename_table);
+	  int new_id = rename_table[id];
+
+	  if ( new_id < 0 || new_id >= rename_table.size() ) { 
+	    std::cerr << "plugin: element was filtered" << std::endl;
+	    return (isl_stat)0;
+	  }
+
+	  sprintf( new_name, "S_%d", new_id );
 
 	  std::cerr << "renaming from " << name << " to " << new_name << std::endl;    
 

@@ -1,5 +1,5 @@
 
-#include <ClangPetInterface.hpp>
+#include "ClangPetInterface.hpp"
 
 #include "clang/AST/RecursiveASTVisitor.h"
 
