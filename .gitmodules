@@ -7,3 +7,6 @@
 [submodule "pluto"]
 	path = pluto_src
 	url = https://github.com/realincubus/pluto_clang.git
+[submodule "plog"]
+	path = plog
+	url = https://github.com/SergiusTheBest/plog.git

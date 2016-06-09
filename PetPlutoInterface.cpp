@@ -6,6 +6,7 @@
 #include "pluto_compat.h"
 #include "pet_cxx.h"
 #include "pet.h"
+#include "plog/Log.h"
 
 #include <chrono>
 #include <iostream>
@@ -56,7 +57,7 @@ void PetPlutoInterface::build_rename_table( isl_union_set* domains, std::vector<
   int max_id = -1;
   isl_union_set_foreach_set(domains, 
       []( __isl_take isl_set* set, void* user ){
-	std::cerr << "Line " << __LINE__ << " " << __FILE__ << std::endl;
+	LOGD << "Line " << __LINE__ << " " << __FILE__ ;
 	int* max_id = (int*) user;
 
 	/* A statement's domain (isl_set) should be named S_%d */
@@ -75,7 +76,7 @@ void PetPlutoInterface::build_rename_table( isl_union_set* domains, std::vector<
   // for half open range usage
   max_id++;
 
-  std::cerr << "plugin: max id " << max_id << std::endl;
+  LOGD << "plugin: max id " << max_id ;
   table.resize(max_id);
   int new_id = 0;
   std::fill( begin(table), end(table), -1 );
@@ -83,7 +84,7 @@ void PetPlutoInterface::build_rename_table( isl_union_set* domains, std::vector<
   // i cannot assume that the domains are in order so i have to search through the list
   for (int i = 0; i < max_id; ++i){
     std::pair<int,int> find_id = std::make_pair( i, -1 );
-    std::cerr << "plugin: who has " << i << std::endl;
+    LOGD << "plugin: who has " << i ;
     isl_union_set_foreach_set(domains, 
 	[]( __isl_take isl_set* set, void* user ){
 
@@ -93,10 +94,10 @@ void PetPlutoInterface::build_rename_table( isl_union_set* domains, std::vector<
 	  assert(isdigit(name[2]));
 	  int id = atoi(&name[2]);
 
-	  std::cerr << "plugin: this is " << id << std::endl;
+	  LOGD << "plugin: this is " << id ;
 
 	  if ( find_id->first == id ) {
-	    std::cerr << "plugin: found id " << id << " at pos " << find_id->first << std::endl;
+	    LOGD << "plugin: found id " << id << " at pos " << find_id->first ;
 	    find_id->second = id;
 	    return (isl_stat)1;
 	  }
@@ -109,9 +110,9 @@ void PetPlutoInterface::build_rename_table( isl_union_set* domains, std::vector<
     }
   }
 
-  std::cerr << "rename table: " << std::endl;
+  LOGD << "rename table: " ;
   for (int i = 0; i < max_id; ++i){
-    std::cerr << i << " " << table[i] << std::endl;
+    LOGD << i << " " << table[i] ;
   }
 
   // if there is no change simply clear the table and do nothing
@@ -186,17 +187,17 @@ struct PlutoRedcutionVariableInfo {
     var_name = p.var_name;  
     // TODO map pet operations to pluto reduction operations
     if ( p.operation == pet_op_add_assign ) {
-      std::cerr << "plugin: converted to pluto + sum" << std::endl;
+      LOGD << "plugin: converted to pluto + sum" ;
       operation = StatementInformation::REDUCTION_SUM;
       return;
     } 
     if ( p.operation == pet_op_mul_assign ) {
-      std::cerr << "plugin: converted to pluto + mul" << std::endl;
+      LOGD << "plugin: converted to pluto + mul" ;
       operation = StatementInformation::REDUCTION_MUL;
       return;
     } 
 
-    std::cerr << "plugin: dont know this reduction type " << p.operation << std::endl;
+    LOGD << "plugin: dont know this reduction type " << p.operation ;
     exit(-1);
   }
   std::string statement;
@@ -223,13 +224,13 @@ static isl_stat add_info_to_id( __isl_take isl_set* set, void* user ) {
 
     auto ctx = isl_id_get_ctx( tuple_id );
     StatementInformation* sinfo = new StatementInformation();
-    std::cerr << "ppi: adding text: " << statement_text << " to id " << id << " at ptr " << sinfo <<  std::endl;
+    LOGD << "ppi: adding text: " << statement_text << " to id " << id << " at ptr " << sinfo ;
 
     // add information from the statement table 
     sinfo->statement_text = statement_text;
     
     for( auto& rvar_info : user_data->reduction_variables_for_tuple_names ){
-      std::cerr << "plugin: " << rvar_info.statement << " " << name << std::endl;
+      LOGD << "plugin: " << rvar_info.statement << " " << name ;
       if ( name == rvar_info.statement ) {
 	PlutoRedcutionVariableInfo p(rvar_info);
 	sinfo->reductions.insert( std::make_pair( p.var_name, p.operation ) );
@@ -245,7 +246,7 @@ static isl_stat add_info_to_id( __isl_take isl_set* set, void* user ) {
     return (isl_stat)0;
   }
 
-  std::cerr << "plugin: this should never happen" << std::endl;
+  LOGD << "plugin: this should never happen" ;
   exit(-1);
   // add the original if nothing changes
   isl_union_set_add_set( user_data->result, set );
@@ -278,24 +279,24 @@ PlutoProg* PetPlutoInterface::compute_deps(
     std::unique_ptr<std::map<std::string,std::string>>& call_texts ) 
   {
 
-  std::cerr << "plugin: building rename table" << std::endl;
+  LOGD << "plugin: building rename table" ;
   isl_union_set* domains = collect_non_kill_domains( pscop );
   std::vector<int> rename_table;
   build_rename_table( domains, rename_table );
-  std::cerr << "plugin: done building rename table" << std::endl;
+  LOGD << "plugin: done building rename table" ;
 
-  std::cerr << "plugin: starting to calculate the dependencies" << std::endl;
+  LOGD << "plugin: starting to calculate the dependencies" ;
   //Dependences dependences( pscop );
   Dependences dependences( pscop );
 
   auto reduction_variables_for_tuple_names = dependences.find_reduction_variables();
-  std::cerr << "plugin: r vars from dep ana " << reduction_variables_for_tuple_names.size() << std::endl;
+  LOGD << "plugin: r vars from dep ana " << reduction_variables_for_tuple_names.size() ;
 
-  std::cerr << "plugin: building pluto data (non compatible) " << std::endl;
+  LOGD << "plugin: building pluto data (non compatible) " ;
   // build the data that will not be linear
   auto pluto_compat_data = dependences.build_pluto_data( );
 
-  std::cerr << "plugin: adding info to ids (non compatible) " << std::endl;
+  LOGD << "plugin: adding info to ids (non compatible) " ;
   // add information that corresponds to this data
   pluto_compat_data.domains = add_extra_infos_to_ids( isl_set_get_space(pscop->context), 
       pluto_compat_data.domains, 
@@ -304,7 +305,7 @@ PlutoProg* PetPlutoInterface::compute_deps(
       reduction_variables_for_tuple_names
   );
 
-  std::cerr << "plugin: making pluto data compatible" << std::endl;
+  LOGD << "plugin: making pluto data compatible" ;
   // reorder all to make it pluto compatible
   dependences.make_pluto_compatible( rename_table, pluto_compat_data );
 
@@ -312,7 +313,7 @@ PlutoProg* PetPlutoInterface::compute_deps(
   //dependency_analysis_style = DependencyAnalysisType::Pluto;
 
   if ( dependency_analysis_style == DependencyAnalysisType::PollyLike ) {
-    std::cerr << "plugin: calling pluto_compute_deps" << std::endl;
+    LOGD << "plugin: calling pluto_compute_deps" ;
     // TODO the kill statements are not respected in isls dependency analysis 
     //      this needs to be taken into account in order to make scoped variables work like expected
     return pluto_compute_deps( 
@@ -329,7 +330,7 @@ PlutoProg* PetPlutoInterface::compute_deps(
 	pluto_compat_data.red 
     );
   }else{
-    std::cerr << "pet_pluto_interface: using pluto to calculate dependencies"  << std::endl;
+    LOGD << "pet_pluto_interface: using pluto to calculate dependencies"  ;
     isl_union_map* schedule= isl_schedule_get_map(pscop->schedule);
     isl_union_map* read = pet_scop_collect_may_reads(pscop);
     isl_union_map* write = pet_scop_collect_must_writes(pscop);
@@ -375,7 +376,7 @@ PlutoProg* PetPlutoInterface::compute_deps(
 
 PlutoProg* PetPlutoInterface::pet_to_pluto_prog(pet_scop* scop, PlutoOptions* pluto_options, std::vector<std::string>& statement_texts ,std::unique_ptr<std::map<std::string,std::string>>& call_texts ){
   PlutoProg* prog =  compute_deps( scop, pluto_options, statement_texts, call_texts ) ;
-  std::cerr << "plugin: pluto program generated"  << std::endl;
+  LOGD << "plugin: pluto program generated"  ;
   return prog;
 }
 
@@ -413,29 +414,29 @@ bool PetPlutoInterface::create_scop_replacement(
   pluto_options->debug = true;
   pluto_options->isldep = true;
 
-  std::cerr << "generating pluto program from pet" << std::endl;
+  LOGD << "generating pluto program from pet" ;
   auto prog = pet_to_pluto_prog(scop, pluto_options, statement_texts, call_texts);
   if ( !prog ) {
-    std::cerr << "could not generate a pluto program from the given pet_scop" << std::endl;
+    LOGD << "could not generate a pluto program from the given pet_scop" ;
     // TODO memory leak put everything into unique_ptr
     // TODO need proper error handling no replacement must be generated
     return false;
   }else{
-    std::cerr << "done generating pluto program from scop" << std::endl;
+    LOGD << "done generating pluto program from scop" ;
   }
 
-  std::cerr << "schedule pluto prog" << std::endl;
+  LOGD << "schedule pluto prog" ;
   
   // the pluto_function returns a number that indicated how many loops are parallel 
   int parallel_loops = pluto_schedule_pluto( prog, pluto_options );
-  std::cerr << "schedule_pluto done " << std::endl;
+  LOGD << "schedule_pluto done " ;
 
   auto end_pluto = std::chrono::high_resolution_clock::now();
   std::chrono::duration<double> diff = end_pluto-begin_pluto;
-  std::cerr << "pluto time consumption " << diff.count() << " s" << std::endl;
+  LOGD << "pluto time consumption " << diff.count() << " s" ;
 
   if ( parallel_loops <= 0 ) {
-    std::cerr << "loop is not parallel" << std::endl;
+    LOGD << "loop is not parallel" ;
 #if 0
     // TODO emit diagnostic on why its not parallel
     // TODO run sequential STL algorithm matcher 
@@ -445,7 +446,7 @@ bool PetPlutoInterface::create_scop_replacement(
     }
     auto end_analyzer = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> diff = end_analyzer-begin_analyzer;
-    std::cerr << "analyzer time consumption " << diff.count() << " s" << std::endl;
+    LOGD << "analyzer time consumption " << diff.count() << " s" ;
 #endif
     return false;
   }
@@ -466,9 +467,9 @@ bool PetPlutoInterface::create_scop_replacement(
 
   auto end_codegen = std::chrono::high_resolution_clock::now();
   std::chrono::duration<double> diff_cg = end_codegen-begin_codegen;
-  std::cerr << "codegen time consumption " << diff_cg.count() << " s" << std::endl;
+  LOGD << "codegen time consumption " << diff_cg.count() << " s" ;
 
-  std::cerr << outfp.str() << std::endl;
+  LOGD << outfp.str() ;
   replacement = outfp.str();
 
   return true;

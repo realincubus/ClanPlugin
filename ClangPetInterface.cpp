@@ -12,6 +12,7 @@
 #include <isl/ctx.h>
 
 #include "dependency_analysis.h"
+#include "plog/Log.h"
 
 #include <chrono>
 
@@ -40,11 +41,11 @@ public:
     if ( SM.isBeforeInTranslationUnit( decl_ref_loc_start , begin ) ) return true;
     if ( SM.isBeforeInTranslationUnit( end , decl_ref_loc_start ) ) return true;
 
-    std::cerr << "visited a node" << std::endl;
+    LOGD << "visited a node" ;
     for( auto i = 0 ; i < iterators.size() ; i++ ){
       auto& iterator = iterators[i];
       if ( declRefExpr->getDecl() == iterator ) {
-	std::cerr << "found a reference" << std::endl;
+	LOGD << "found a reference" ;
 	// push_this occurence to the list of excludes for this iterator
 	exclude_ranges.push_back( make_pair( declRefExpr->getSourceRange(), std::to_string(i)) );
 	return true;
@@ -70,8 +71,8 @@ std::vector<NamedDecl*> get_parameters_for_pet_stmt( pet_stmt* stmt ) {
     int in_param = isl_space_dim(space, isl_dim_in);
     int out_param = isl_space_dim(space, isl_dim_out);
 
-    std::cerr << "in_param " << in_param << std::endl;
-    std::cerr << "out_param " << out_param << std::endl;
+    LOGD << "in_param " << in_param ;
+    LOGD << "out_param " << out_param ;
 
     std::vector<NamedDecl*> parameters;
 
@@ -83,7 +84,7 @@ std::vector<NamedDecl*> get_parameters_for_pet_stmt( pet_stmt* stmt ) {
     if ( in_param > 0 ) {
       auto type = isl_dim_in;
       const char* name = isl_space_get_dim_name( space, type, 0 );
-      std::cerr << "dim in param " << name << std::endl;
+      LOGD << "dim in param " << name ;
       assert( 0 && "not implemented" );
     }
 
@@ -92,16 +93,16 @@ std::vector<NamedDecl*> get_parameters_for_pet_stmt( pet_stmt* stmt ) {
       auto type = isl_dim_out;
       const char* name = isl_space_get_dim_name( space, type, i );
       isl_id* id = isl_space_get_dim_id( space, type, i );
-      std::cerr << "dim out param " << name << std::endl;
+      LOGD << "dim out param " << name ;
       if ( id ) {
-	std::cerr << "id " << id << std::endl;
+	LOGD << "id " << id ;
 	void* user_data = isl_id_get_user( id );
 	if ( user_data ) {
 	  NamedDecl* named_decl = (NamedDecl*) user_data ;
 	  parameters.push_back( named_decl );
 	}
       }else{
-	std::cerr << "no id" << std::endl;
+	LOGD << "no id" ;
       }
     }
 
@@ -132,7 +133,7 @@ std::string getSourceText( SourceLocation starts_with,
       LangOptions()
     );
 
-    std::cerr << "parsed: " << ret << std::endl;
+    LOGD << "parsed: " << ret ;
 
     lexer_result += ret;
     lexer_result += std::string("...") + exclude.second + std::string("...");
@@ -151,7 +152,7 @@ std::string getSourceText( SourceLocation starts_with,
     LangOptions()
   );
 
-  std::cerr << "parsed: " << ret << std::endl;
+  LOGD << "parsed: " << ret ;
 
   lexer_result += ret;
 
@@ -168,7 +169,7 @@ std::string getSourceText( SourceLocation starts_with,
     }
   }
 
-  std::cerr << "lexer_result: " << lexer_result << std::endl;
+  LOGD << "lexer_result: " << lexer_result ;
 
   return lexer_result;
 
@@ -180,11 +181,11 @@ std::string ClangPetInterface::replace_with_placeholder(
     std::vector<NamedDecl*>& parameters ) {
 
   // translate this to a source locations 
-  std::cerr << "statement at " << pet_loc_get_start(loc) << " to " << pet_loc_get_end( loc ) << std::endl;
+  LOGD << "statement at " << pet_loc_get_start(loc) << " to " << pet_loc_get_end( loc ) ;
   auto begin_stmt = sloc_file.getLocWithOffset( pet_loc_get_start(loc) );
   auto end_stmt = sloc_file.getLocWithOffset( pet_loc_get_end(loc)-1 );
-  std::cerr << "begin loc " << begin_stmt.printToString(SM) << std::endl;
-  std::cerr << "end loc " << end_stmt.printToString(SM) << std::endl;
+  LOGD << "begin loc " << begin_stmt.printToString(SM) ;
+  LOGD << "end loc " << end_stmt.printToString(SM) ;
   
   // TODO i believe it should be enought to do this once
   DeclRefVisitor visitor(parameters, begin_stmt, end_stmt, SM);
@@ -212,9 +213,9 @@ std::vector<std::string> ClangPetInterface::get_statement_texts( pet_scop* scop 
     // replace the iterator name in this string with a placeholder
     auto text = replace_with_placeholder( loc, parameters );
 
-    std::cerr << "isl_domain: "  << std::endl;
+    LOGD << "isl_domain: "  ;
     isl_set_dump( domain );
-    std::cerr << "got text: " << text << std::endl;
+    LOGD << "got text: " << text ;
 
     const char* tname = isl_set_get_tuple_name( domain );
 
@@ -246,19 +247,19 @@ pet_scop* ClangPetInterface::extract_scop(
   
   DiagnosticsEngine& diag = ctx_clang.getDiagnostics();
 
-  std::cerr << "handling for_stmt " << ctr++ << std::endl;
+  LOGD << "handling for_stmt " << ctr++ ;
   Pet pet_scanner( diag, &ctx_clang );
-  std::cerr << "done creating the Pet scanner object" << std::endl;
+  LOGD << "done creating the Pet scanner object" ;
 
   auto begin_pet = std::chrono::high_resolution_clock::now();
-  std::cerr << "calling pet_scop_extract_from_clang_ast" << std::endl;
+  LOGD << "calling pet_scop_extract_from_clang_ast" ;
   // sets the instance variable scop
   pet_scanner.pet_scop_extract_from_clang_ast(&ctx_clang,(ForStmt*)for_stmt, (FunctionDecl*) function_decl, call_texts, &scop); 
 
-  std::cerr << "done calling pet_scop_extract_from_clang_ast" << std::endl;
+  LOGD << "done calling pet_scop_extract_from_clang_ast" ;
   auto end_pet = std::chrono::high_resolution_clock::now();
   std::chrono::duration<double> diff = end_pet-begin_pet;
-  std::cerr << "pet time consumption " << diff.count() << " s" << std::endl;
+  LOGD << "pet time consumption " << diff.count() << " s" ;
 
   return scop;
 }
@@ -267,7 +268,7 @@ pet_scop* ClangPetInterface::extract_scop(
 clang::SourceLocation 
 ClangPetInterface::getLocBeginOfScop( ) {
  pet_loc* loc = scop->loc;
- std::cerr << "at line " << pet_loc_get_line(loc) << std::endl;
+ LOGD << "at line " << pet_loc_get_line(loc) ;
 
  return sloc_file.getLocWithOffset( pet_loc_get_start(loc) );
 }

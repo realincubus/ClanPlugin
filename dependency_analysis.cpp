@@ -4,6 +4,7 @@
 #include "pluto_compat.h"
 #include "MemoryAccess.hpp"
 #include "ScopStmt.hpp"
+#include "plog/Log.h"
 
 #include <isl/schedule_node.h>
 
@@ -71,13 +72,13 @@ Dependences::collectInfo(Scop &S, isl_union_map **Read, isl_union_map **Write,
 	continue;
       }
 
-      std::cerr << "dep anaylsis: dumping isl_union_map of accdom"  << std::endl;
+      LOGD << "dep anaylsis: dumping isl_union_map of accdom"  ;
       isl_map_dump( accdom );
 
       accdom = isl_map_intersect_domain(accdom, domcp);
-      std::cerr << "after intersect with domain" << std::endl;
+      LOGD << "after intersect with domain" ;
       isl_map_dump( accdom );
-      std::cerr << "done dumping: after intersect with domain" << std::endl;
+      LOGD << "done dumping: after intersect with domain" ;
 
       if (ReductionBaseValues.count(MA.getBaseAddr())) {
         // Wrap the access domain and adjust the schedule accordingly.
@@ -100,7 +101,7 @@ Dependences::collectInfo(Scop &S, isl_union_map **Read, isl_union_map **Write,
 
         *AccessSchedule = isl_union_map_add_map(*AccessSchedule, Schedule);
       } else {
-	std::cerr << "dep analysis: tagging accdom" << std::endl;
+	LOGD << "dep analysis: tagging accdom" ;
         accdom = tag(accdom, &MA, Level);
         if (Level > Dependences::AL_Statement) {
           isl_map *Schedule = tag(Stmt->getSchedule(), &MA, Level);
@@ -108,17 +109,17 @@ Dependences::collectInfo(Scop &S, isl_union_map **Read, isl_union_map **Write,
         }
       }
 
-      std::cerr << "dep analysis: adding reads" << std::endl;
+      LOGD << "dep analysis: adding reads" ;
       // in contrast to llvm nodes, something from clang AST can be both  
       if (MA.isRead()){
         *Read = isl_union_map_add_map(*Read, isl_map_copy(accdom));
       }
       
-      std::cerr << "dep analysis: adding writes" << std::endl;
+      LOGD << "dep analysis: adding writes" ;
       if (MA.isWrite()){
         *Write = isl_union_map_add_map(*Write, isl_map_copy(accdom));
       }
-      std::cerr << "dep analysis: done MA loop" << std::endl;
+      LOGD << "dep analysis: done MA loop" ;
 
       // TODO i think i need to delete the accdom now
     }
@@ -126,7 +127,7 @@ Dependences::collectInfo(Scop &S, isl_union_map **Read, isl_union_map **Write,
     if (Level == Dependences::AL_Statement){
       *StmtSchedule = isl_union_map_add_map(*StmtSchedule, Stmt->getSchedule());
     }
-    std::cerr << "done " << __PRETTY_FUNCTION__ << std::endl;
+    LOGD << "done " << __PRETTY_FUNCTION__ ;
   }
 
   // TODO i have no idea what this is about
@@ -142,20 +143,20 @@ Dependences::collectInfo(Scop &S, isl_union_map **Read, isl_union_map **Write,
   *Write = isl_union_map_coalesce(*Write);
   *MayWrite = isl_union_map_coalesce(*MayWrite);
 
-  std::cerr << "read" << std::endl;
+  LOGD << "read" ;
   isl_union_map_dump( *Read );
-  std::cerr << "write" << std::endl;
+  LOGD << "write" ;
   isl_union_map_dump( *Write );
-  std::cerr << "may write" << std::endl;
+  LOGD << "may write" ;
   isl_union_map_dump( *MayWrite );
-  std::cerr << "schedule" << std::endl;
+  LOGD << "schedule" ;
   isl_union_map_dump( *StmtSchedule );
-  std::cerr << "kill statements" << std::endl;
+  LOGD << "kill statements" ;
   isl_union_map_dump( *KillStatements );
 }
 
 #define DEBUG(x) 
-#define dbgs() std::cerr 
+#define dbgs() LOGD 
 
 
 static __isl_give isl_union_flow *buildFlow(__isl_keep isl_union_map *Snk,
@@ -227,7 +228,7 @@ void Dependences::calculateDependences( Scop& S ){
         dbgs() << "AccessSchedule: " << AccessSchedule << '\n';
         dbgs() << "StmtSchedule: " << StmtSchedule << '\n';);
 
-  std::cerr << "AccessSchedule" << std::endl;
+  LOGD << "AccessSchedule" ;
   isl_union_map_dump( AccessSchedule );
 
   if (isl_union_map_is_empty(AccessSchedule)) {
@@ -282,11 +283,11 @@ void Dependences::calculateDependences( Scop& S ){
     WAW = isl_union_flow_get_must_dependence(Flow);
     WAR = isl_union_flow_get_may_dependence(Flow);
 
-    std::cerr << "raw" << std::endl;
+    LOGD << "raw" ;
     isl_union_map_dump( RAW );
-    std::cerr << "war" << std::endl;
+    LOGD << "war" ;
     isl_union_map_dump( WAR );
-    std::cerr << "waw" << std::endl;
+    LOGD << "waw" ;
     isl_union_map_dump( WAW );
 
     // This subtraction is needed to obtain the same results as were given by
@@ -345,11 +346,11 @@ void Dependences::calculateDependences( Scop& S ){
   isl_ctx_reset_operations(IslCtx);
   isl_ctx_set_max_operations(IslCtx, MaxOpsOld);
 
-  std::cerr << "raw" << std::endl;
+  LOGD << "raw" ;
   isl_union_map_dump( RAW );
-  std::cerr << "war" << std::endl;
+  LOGD << "war" ;
   isl_union_map_dump( WAR );
-  std::cerr << "waw" << std::endl;
+  LOGD << "waw" ;
   isl_union_map_dump( WAW );
 
   isl_union_map *STMT_RAW, *STMT_WAW, *STMT_WAR;
@@ -362,11 +363,11 @@ void Dependences::calculateDependences( Scop& S ){
   STMT_WAR = isl_union_map_intersect_domain(isl_union_map_copy(WAR),
                                             isl_union_map_domain(StmtSchedule));
 
-  std::cerr << "stmt_raw" << std::endl;
+  LOGD << "stmt_raw" ;
   isl_union_map_dump( STMT_RAW );
-  std::cerr << "stmt_war" << std::endl;
+  LOGD << "stmt_war" ;
   isl_union_map_dump( STMT_WAR );
-  std::cerr << "stmt_waw" << std::endl;
+  LOGD << "stmt_waw" ;
   isl_union_map_dump( STMT_WAW );
 
   DEBUG({
@@ -422,7 +423,7 @@ void Dependences::calculateDependences( Scop& S ){
     dbgs() << "\n";
   });
 
-  std::cerr << "RED" << std::endl;
+  LOGD << "RED" ;
   isl_union_map_dump( RED );
 
 
@@ -604,20 +605,20 @@ void Dependences::addPrivatizationDependences() {
 PlutoCompatData Dependences::build_pluto_data( ) {
   PlutoCompatData pcd;
 
-  std::cerr << "dep ana: creating compat data" << std::endl;
+  LOGD << "dep ana: creating compat data" ;
 
   isl_space* space = scop.getParamSpace();
 
   pcd.schedule = isl_schedule_get_map( scop.getSchedule() );
-  std::cerr << "dep ana: reads" << std::endl;
+  LOGD << "dep ana: reads" ;
   pcd.reads = scop.getReads();
-  std::cerr << "dep ana: writes" << std::endl;
+  LOGD << "dep ana: writes" ;
   pcd.writes = scop.getWrites();
 
   pcd.context = isl_set_copy(scop.getContext());
   pcd.empty = isl_union_map_empty(space);
 
-  std::cerr << "dep ana: domains" << std::endl;
+  LOGD << "dep ana: domains" ;
   pcd.domains = scop.getDomains();
 
   pcd.raw = isl_union_map_copy(RAW);
@@ -632,9 +633,9 @@ PlutoCompatData Dependences::make_pluto_compatible( std::vector<int>& rename_tab
   
   isl_space* space = scop.getParamSpace();
 
-  std::cerr << "writes before rename " << pcd.writes << std::endl;
+  LOGD << "writes before rename " << pcd.writes ;
   isl_union_map_dump(pcd.writes);
-  std::cerr << "done writes before rename" << std::endl;
+  LOGD << "done writes before rename" ;
   if ( rename_table.size() > 0 ) {
     pcd.schedule = linearize_union_map( space, pcd.schedule, rename_table );
     pcd.reads = linearize_union_map( space, pcd.reads, rename_table );
@@ -645,7 +646,7 @@ PlutoCompatData Dependences::make_pluto_compatible( std::vector<int>& rename_tab
     pcd.red = linearize_union_map( space, pcd.red, rename_table );
     pcd.domains = linearize_union_set( space, pcd.domains, rename_table );
   }
-  std::cerr << "writes after rename" << std::endl;
+  LOGD << "writes after rename" ;
   isl_union_map_dump(pcd.writes);
 
   return pcd;
@@ -659,7 +660,7 @@ __isl_give isl_union_map *
 Scop::getAccessesOfType(std::function<bool(MemoryAccess &)> Predicate) {
   isl_union_map *Accesses = isl_union_map_empty(getParamSpace());
 
-  std::cerr << "depana: " << __PRETTY_FUNCTION__ << std::endl;
+  LOGD << "depana: " << __PRETTY_FUNCTION__ ;
 
   for (auto& Stmt : *this) {
     for (MemoryAccess& MA : *Stmt) {
@@ -667,10 +668,10 @@ Scop::getAccessesOfType(std::function<bool(MemoryAccess &)> Predicate) {
         continue;
 
       isl_set *Domain = Stmt->getDomain();
-      std::cerr << "depana: domain:" << std::endl;
+      LOGD << "depana: domain:" ;
       isl_set_dump( Domain );
       isl_map *AccessDomain = MA.getAccessRelation();
-      std::cerr << "depana: accessrelation:" << std::endl;
+      LOGD << "depana: accessrelation:" ;
       isl_map_dump( AccessDomain );
 
       if ( !AccessDomain ) 
@@ -727,30 +728,30 @@ std::vector<PetReductionVariableInfo> Dependences::find_reduction_variables( ){
 	int in = isl_map_n_in( map );
 	int out = isl_map_n_out( map );
 	int param = isl_map_n_param( map );
-	std::cerr << "depana: " << in << " " << out  << " " << param  << std::endl;
+	LOGD << "depana: " << in << " " << out  << " " << param  ;
 	const char* in_name = isl_map_get_tuple_name( map, isl_dim_in );
-	std::cerr << "depana: in name " << in_name << std::endl;
+	LOGD << "depana: in name " << in_name ;
 	const char* out_name = isl_map_get_tuple_name( map, isl_dim_out );
 	if ( strcmp(in_name,out_name) != 0 ) {
-	  std::cerr << "depana warning: in and out name are not the same. never tested this case " << std::endl;
+	  LOGD << "depana warning: in and out name are not the same. never tested this case " ;
 	  exit(-1);
 	}
 
 	auto* s = dependences->scop.getStmtByTupleName( in_name );
 	if ( s ) {
-	  std::cerr << "depana: found the corresponding statement"  << std::endl;
+	  LOGD << "depana: found the corresponding statement"  ;
 	  for( auto& MA : *s ){
 	    if ( MA.isReductionLike() ) {
 	      auto ba = MA.getBaseAddr();
 	      const char* name = isl_id_get_name( ba );
-	      std::cerr << "depana: name " << name  << " storing result in vector "<< std::endl;
+	      LOGD << "depana: name " << name  << " storing result in vector ";
 	      auto op_type = MA.getReductionType();
 	      user_data->first->push_back( PetReductionVariableInfo{ in_name, name, (pet_op_type)op_type } );
 	    }
 	  }
 	  
 	}else{
-	  std::cerr << "depana error: could not find the statement by its id" << std::endl;
+	  LOGD << "depana error: could not find the statement by its id" ;
 	  exit(-1);
 	}
 
@@ -779,23 +780,23 @@ static isl_bool find_set_in_schedule( isl_schedule_node* node, void* user ) {
 
 
     isl_union_set* filter = isl_schedule_node_filter_get_filter( node );
-    //std::cerr << "filter: " << std::endl;
+    //LOGD << "filter: " ;
     //isl_union_set_dump( filter );
     // skip all filter nodes with more than one set
     if ( isl_union_set_n_set( filter ) == 1 ) {
       auto* result = isl_union_set_intersect( isl_union_set_from_set(isl_set_copy(set)), filter );
       if ( isl_union_set_is_empty( result ) ){
 	isl_union_set_free( result );
-	std::cerr << "this set does not contain this set" << std::endl;
+	LOGD << "this set does not contain this set" ;
       }else{
 	isl_union_set_free( result );
-	std::cerr << "this set DOES contain this set" << std::endl;
+	LOGD << "this set DOES contain this set" ;
 	fr->second = isl_schedule_node_copy(node);
 	// stop recursing
 	return (isl_bool)0;
       }
     }else{
-      std::cerr << "not considering this node since it has to have subnodes" << std::endl;
+      LOGD << "not considering this node since it has to have subnodes" ;
     }
   }
   return (isl_bool)1; 
@@ -803,7 +804,7 @@ static isl_bool find_set_in_schedule( isl_schedule_node* node, void* user ) {
 
 // TODO get the position in the schedule
 static isl_schedule_node* getScheduleNode( isl_schedule* schedule, isl_set* set ) {
-  std::cerr << "searching for :" << std::endl;
+  LOGD << "searching for :" ;
   isl_set_dump( set );
   find_result f = std::make_pair( set, nullptr );
   isl_schedule_foreach_schedule_node_top_down( schedule, &find_set_in_schedule, &f );
@@ -811,7 +812,7 @@ static isl_schedule_node* getScheduleNode( isl_schedule* schedule, isl_set* set 
 }
 
 static isl_set* get_source_from_map( isl_map* map ) {
-  std::cerr << "source: " << std::endl;
+  LOGD << "source: " ;
   isl_set* set = isl_map_domain( map );
   isl_set_dump( set );
   return set;
@@ -819,7 +820,7 @@ static isl_set* get_source_from_map( isl_map* map ) {
 }
 
 static isl_set* get_destination_from_map ( isl_map* map ) {
-  std::cerr << "destination: " << std::endl;
+  LOGD << "destination: " ;
   isl_set* set = isl_map_range( map );
   isl_set_dump( set );
   return set;
@@ -835,25 +836,25 @@ static isl_bool find_nodes( isl_schedule_node* node, void* user ) {
   bool& a_found = std::get<3>(*fnd);
 
 #if 0
-  std::cerr << "a node" << std::endl;
+  LOGD << "a node" ;
   isl_schedule_node_dump( a ) ;
 
-  std::cerr << "b node" << std::endl;
+  LOGD << "b node" ;
   isl_schedule_node_dump( b ) ;
 
-  std::cerr << "n node" << std::endl;
+  LOGD << "n node" ;
   isl_schedule_node_dump( node ) ;
 #endif
 
   if ( !a_found && isl_schedule_node_is_equal(node,a)  ) {
     a_found = true;
-    std::cerr << "a found" << std::endl;
+    LOGD << "a found" ;
     return (isl_bool)1;
   }
 
   if ( a_found && isl_schedule_node_is_equal(node,b) ) {
     is_before = true;
-    std::cerr << "b found" << std::endl;
+    LOGD << "b found" ;
   }
 
   return (isl_bool)1;
@@ -885,7 +886,7 @@ static isl_bool find_kill_statement( isl_schedule_node* node, void* user ) {
     filter = isl_schedule_node_filter_get_filter( node );
     // skip all filter nodes with more than one set
     if ( isl_union_set_n_set( filter ) != 1 ) {
-      std::cerr << "skipping this filter node since it has to have children" << std::endl;
+      LOGD << "skipping this filter node since it has to have children" ;
       // recurse
       return (isl_bool)1;
     }
@@ -898,7 +899,7 @@ static isl_bool find_kill_statement( isl_schedule_node* node, void* user ) {
   bool& source_found = std::get<5>( *ksad );
 
   if ( !source_found && isl_schedule_node_is_equal( node, source_node ) ) {
-    std::cerr << "found the source statement heading for the destination statement" << std::endl;
+    LOGD << "found the source statement heading for the destination statement" ;
     source_found = true;
     // dont recurse -> kill stmt has to be in sequence
     return (isl_bool)0;
@@ -920,35 +921,35 @@ static isl_bool find_kill_statement( isl_schedule_node* node, void* user ) {
   // and if this statement kills the range we are looking for 
   // set the kill flag to true
   if ( source_found && !is_killed ) {
-    std::cerr << "checking for killstatement " << std::endl;
+    LOGD << "checking for killstatement " ;
     isl_union_map* kill_statements = std::get<2>(*ksad);
-    std::cerr << "kill statements are: " << std::endl;
+    LOGD << "kill statements are: " ;
     isl_union_map_dump( kill_statements );
-    std::cerr << "intersecting with filter: "<< std::endl;
+    LOGD << "intersecting with filter: ";
     isl_union_set_dump( filter );
     isl_union_map* kills = isl_union_map_intersect_domain( isl_union_map_copy(kill_statements), filter ); 
-    std::cerr << "kills are:" << std::endl;
+    LOGD << "kills are:" ;
     isl_union_map_dump( kills );
 
     // check wether this statement is a kill_statement 
     if ( !isl_union_map_is_empty( kills ) ){
       // has to be one element
       if ( isl_union_map_n_map( kills ) != 1 ) {
-	std::cerr << "union map has != 1 element cant handle this" << std::endl;
+	LOGD << "union map has != 1 element cant handle this" ;
 	exit(-1);
       }
 
       isl_set* range = std::get<3>(*ksad);
-      std::cerr << "checking range:" << std::endl;
+      LOGD << "checking range:" ;
       isl_set_dump( range );
       isl_map* kill = isl_map_from_union_map( kills );
       isl_set* kill_range = isl_map_range( kill );
-      std::cerr << "with kill range:"  << std::endl;
+      LOGD << "with kill range:"  ;
       isl_set_dump( kill_range );
       
       // now check that both ranges are the same 
       if ( isl_set_is_equal( range, kill_range ) ) {
-	std::cerr << "both ranges are identical setting is_killed true" << std::endl;
+	LOGD << "both ranges are identical setting is_killed true" ;
 	is_killed = true;
 	return (isl_bool)0;
       }
@@ -966,7 +967,7 @@ static bool is_killed(
     isl_union_map* kill_statements, 
     isl_set* range 
 ){
-  std::cerr << __PRETTY_FUNCTION__ << std::endl;
+  LOGD << __PRETTY_FUNCTION__ ;
   // TODO intersect it with the kill statements on route from source to destination
   KillStatementAnalysisData ksad = std::make_tuple( a, b, kill_statements, range, false, false );
   // need to call this two times if source is after destination
@@ -994,11 +995,11 @@ static isl_stat considerKillStatementsForMap( isl_map* map, void* user ) {
   auto schedule_node_destination = getScheduleNode( schedule, destination );
 
   if ( !schedule_node_source ) {
-    std::cerr << "did not get schedule node for source" << std::endl;
+    LOGD << "did not get schedule node for source" ;
   }
 
   if ( !schedule_node_destination ) {
-    std::cerr << "did not get schedule node for destination" << std::endl;
+    LOGD << "did not get schedule node for destination" ;
   }
 
   // the destination is the write statement in a write after read
@@ -1019,9 +1020,9 @@ static isl_stat considerKillStatementsForMap( isl_map* map, void* user ) {
     // if the source statement is before the destination statement its ok 
     // but if its vice versa one has to check the kill statements 
     if ( is_before( schedule, schedule_node_source, schedule_node_destination ) ) {
-      std::cerr << "destination is after source -> no next iter" << std::endl;
+      LOGD << "destination is after source -> no next iter" ;
     }else{
-      std::cerr << "destination is before source -> next iter" << std::endl;
+      LOGD << "destination is before source -> next iter" ;
       bool isKilled = is_killed( 
 	  schedule, 
 	  schedule_node_source, 
@@ -1031,15 +1032,15 @@ static isl_stat considerKillStatementsForMap( isl_map* map, void* user ) {
       );
 
       if ( isKilled ) {
-	std::cerr << "the write operation was killed by a kill statement on route to the destination"
-	 << " you can delete this dependency" << std::endl;
+	LOGD << "the write operation was killed by a kill statement on route to the destination"
+	 << " you can delete this dependency" ;
 	// return prematurely to not add this map to the new union map
 	return (isl_stat)0;
       }
     }
 
   }else{
-    std::cerr << "can not handle multiple writes in one statement -> not implemented" << std::endl;
+    LOGD << "can not handle multiple writes in one statement -> not implemented" ;
     exit(-1);
   }
 
@@ -1053,17 +1054,17 @@ isl_union_map* Dependences::considerKillStatements( isl_union_map* DEPS,
     isl_union_map* writes, 
     isl_union_map* kill_statements 
 ){
-  std::cerr << __PRETTY_FUNCTION__ << " begin " << std::endl;
+  LOGD << __PRETTY_FUNCTION__ << " begin " ;
   isl_space* space = isl_union_map_get_space( DEPS );
   isl_union_map* new_deps = isl_union_map_empty( space );
   KillStatementsData ksd = std::make_tuple( schedule, writes, kill_statements, new_deps );
   // iterate over all dependencies
   isl_union_map_foreach_map( DEPS , &considerKillStatementsForMap, &ksd );
 
-  std::cerr << __PRETTY_FUNCTION__ << " end " << std::endl;
-  std::cerr << "old deps:" << std::endl;
+  LOGD << __PRETTY_FUNCTION__ << " end " ;
+  LOGD << "old deps:" ;
   isl_union_map_dump( DEPS );
-  std::cerr << "new deps:" << std::endl;
+  LOGD << "new deps:" ;
   isl_union_map_dump( std::get<3>(ksd ) );
 
   return std::get<3>(ksd);

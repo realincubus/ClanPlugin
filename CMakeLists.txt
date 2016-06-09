@@ -55,6 +55,7 @@ include_directories( ${PET_INCLUDE_DIR} )
 include_directories( ${PET_ISL_INCLUDE_DIR} )
 include_directories( ${PLUTO_INCLUDE_DIR}  )
 include_directories( ${PLUTO_CODEGEN_CXX_INCLUDE_DIR} )
+include_directories( plog/include )
 
 # llvm and clang definitions and include dirs
 include_directories(${LLVM_INCLUDE_DIRS})

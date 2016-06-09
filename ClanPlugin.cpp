@@ -31,6 +31,10 @@
 #include <memory>
 #include <mutex>
 
+// logging 
+#include "plog/Log.h"
+#include "plog/Appenders/ConsoleAppender.h"
+
 #include "PetPlutoInterface.hpp"
 #include "ClangPetInterface.hpp"
 
@@ -50,7 +54,7 @@ class Callback : public MatchFinder::MatchCallback {
     }
      // is the function that is called if the matcher finds something
      virtual void run(const MatchFinder::MatchResult &Result){
-       std::cerr << "plugin: callback called " << std::endl;
+       LOGD << "plugin: callback called " ;
        ASTContext& context = *Result.Context;
        SourceManager& SM = context.getSourceManager();
 
@@ -65,7 +69,7 @@ class Callback : public MatchFinder::MatchCallback {
 	     pet_scop* scop = cp_interface.extract_scop( function_decl, call_texts );
 
 	     if ( scop ) {
-	       std::cerr << "found a valid scop" << std::endl;
+	       LOGD << "found a valid scop" ;
 	       
 	       // TODO move to pet code
 	       // find the text of the original statement
@@ -75,17 +79,17 @@ class Callback : public MatchFinder::MatchCallback {
 	       PetPlutoInterface pp_interface(header_includes, emit_code_type, write_cloog_file);
 	       if ( pp_interface.create_scop_replacement( scop, statement_texts, call_texts ) ){
 
-		 std::cerr << "emitting diagnositc" << std::endl;
+		 LOGD << "emitting diagnositc" ;
 		 DiagnosticsEngine& diag = context.getDiagnostics();
 		 unsigned DiagID = diag.getCustomDiagID(DiagnosticsEngine::Warning, "found a scop");
-		 std::cerr << "got id " << DiagID << std::endl;
+		 LOGD << "got id " << DiagID ;
 
 		 auto replacement = pp_interface.getReplacement();
 		 auto begin_scop = cp_interface.getLocBeginOfScop();
 
 		 // replace the for statement
 		 diag.Report(begin_scop, DiagID) << FixItHint::CreateReplacement(for_stmt->getSourceRange(), replacement.c_str() );
-		 std::cerr << "reported error " << DiagID << std::endl;
+		 LOGD << "reported error " << DiagID ;
 	       }
 
 	     }
@@ -175,9 +179,9 @@ public:
 	auto iloc = SM.getIncludeLoc( SM.getFileID(file_begin) );
 	auto text = getText( iloc, SM );
 	if ( text != "invalid" ) {
-	  std::cerr << "preprocessor " << text << std::endl;
+	  LOGD << "preprocessor " << text ;
 	  auto name = parseHeaderName( text );
-	  std::cerr << "preprocessor parsed name " << name << std::endl;
+	  LOGD << "preprocessor parsed name " << name ;
 	  // TODO this can happen in parallel lock it with a mutex 
 	  std::lock_guard<std::mutex> lock(getMutex());
 	  getHeaderSet().insert( name );
@@ -217,11 +221,11 @@ public:
     write_cloog_file(_write_cloog_file),
     enter_callback( callbacks )
   { 
-    std::cerr << "for loop consumer created " << this << std::endl;
+    LOGD << "for loop consumer created " << this ;
   }
 
   ~ForLoopConsumer(){
-    std::cerr << "for loop consumer destroyed " << this << std::endl;
+    LOGD << "for loop consumer destroyed " << this ;
   }
 
 
@@ -247,26 +251,26 @@ public:
     auto begin = std::chrono::high_resolution_clock::now();
     MatchFinder Finder;
     Callback Fixer(emit_code_type, write_cloog_file);
-    std::cerr << "adding matcher" << std::endl;
+    LOGD << "adding matcher" ;
     Finder.addMatcher( makeForLoopMatcher(), &Fixer);
-    std::cerr << "running matcher" << std::endl;
+    LOGD << "running matcher" ;
     Finder.matchAST(clang_ctx);
 
     add_missing_includes(Fixer, clang_ctx);
 
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> diff = end-begin;
-    std::cerr << "plugin: time consumption " << diff.count() << " s" << std::endl;
+    LOGD << "plugin: time consumption " << diff.count() << " s" ;
   }
 
   bool isHeaderAlreadyIncluded( std::string header, ASTContext& clang_ctx ) {
 
     std::lock_guard<std::mutex> lock(enter_callback->getMutex());
-    std::cerr << "plugin: number of already included headers " << enter_callback->getHeaderSet().size() << std::endl;
+    LOGD << "plugin: number of already included headers " << enter_callback->getHeaderSet().size() ;
     for( auto& included_header : enter_callback->getHeaderSet() ){
-      std::cerr << "comparing: " << included_header << " with " << header  << std::endl;
+      LOGD << "comparing: " << included_header << " with " << header  ;
       if ( header == included_header ) {
-	std::cerr << "plugin: header is already included" << std::endl;
+	LOGD << "plugin: header is already included" ;
 	return true;
       }
     }
@@ -311,11 +315,19 @@ class ClanAction : public PluginASTAction {
 
   public:
     ClanAction(){
-      std::cerr << "clang action " << this << " created " << std::endl;
+      static bool once = true;
+      if ( once ) {
+	static plog::ConsoleAppender<plog::TxtFormatter> consoleAppender;
+	plog::init(plog::debug, &consoleAppender); 
+	once = false;
+	LOGD << "logger initialized ";
+      }
+
+      LOGD << "clang action " << this << " created " ;
     }
 
     virtual ~ClanAction(){
-      std::cerr << "clang action " << this << " destroyed " << std::endl;
+      LOGD << "clang action " << this << " destroyed ";
     }
 
 protected:
@@ -341,7 +353,7 @@ PPEnterCallback* setupCallbacks( CompilerInstance& CI ) {
 
   if ( CI.hasPreprocessor() ) {
     auto& pp = CI.getPreprocessor(); 
-    std::cerr << "plugin: got the preprocessor" << std::endl;
+    LOGD << "plugin: got the preprocessor" ;
 
     if ( CI.hasSourceManager() ) {
       auto& SM = CI.getSourceManager();
@@ -354,15 +366,17 @@ PPEnterCallback* setupCallbacks( CompilerInstance& CI ) {
     }
 
     }else{
-    std::cerr << "ci does not have a preprocessor"  << std::endl;
+    LOGD << "ci does not have a preprocessor"  ;
   }
   return nullptr;
 }
 
 std::unique_ptr<ASTConsumer> 
 ClanAction::CreateASTConsumer(CompilerInstance &CI, llvm::StringRef){
+
+
   if ( redirect_stdout_file != "" ) {
-    std::cout << "redirect_stdout_file " << redirect_stdout_file << std::endl;
+    LOGD << "redirect_stdout_file " << redirect_stdout_file;
     // TODO mutex
     if ( once_std_out ) {
       std::freopen(redirect_stdout_file.c_str(), "a", stdout);
@@ -371,7 +385,7 @@ ClanAction::CreateASTConsumer(CompilerInstance &CI, llvm::StringRef){
     }     
   }
   if ( redirect_stderr_file != "" ) {
-    std::cout << "redirect_stderr_file " << redirect_stderr_file << std::endl;
+    LOGD << "redirect_stderr_file " << redirect_stderr_file;
     // TODO mutex
     if ( once_std_err ) {
       std::freopen(redirect_stderr_file.c_str(), "a", stderr);
@@ -379,11 +393,11 @@ ClanAction::CreateASTConsumer(CompilerInstance &CI, llvm::StringRef){
       once_std_err = false;
     }     
   }
-  std::cerr << "makeing new Consumer object with compiler instance " << &CI << std::endl;
+  LOGD << "makeing new Consumer object with compiler instance " << &CI ;
   auto enter_callback = setupCallbacks( CI );
   auto ret =  llvm::make_unique<ForLoopConsumer>(emit_code_type, write_cloog_file, enter_callback);
-  std::cerr << "at load ci " << ret.get() << " instance " << &CI << " ast context " << &CI.getASTContext() << " SM " << &CI.getSourceManager() << std::endl;
-  std::cerr << "done with the new consumer object" << std::endl;
+  LOGD << "at load ci " << ret.get() << " instance " << &CI << " ast context " << &CI.getASTContext() << " SM " << &CI.getSourceManager() ;
+  LOGD << "done with the new consumer object" ;
 
   // TODO find all header includs in the main file and pass them to the ForLoopConsumer
 
@@ -395,7 +409,7 @@ ClanAction::ParseArgs(const CompilerInstance &CI, const std::vector<std::string>
   std::string* next_arg = nullptr;
 
   for (unsigned i = 0, e = args.size(); i != e; ++i) {
-    llvm::errs() << "Clan arg = " << args[i] << "\n";
+    LOGD << "Clan arg = " << args[i];
 
     if ( next_arg ) {
       *next_arg = args[i];
@@ -404,44 +418,44 @@ ClanAction::ParseArgs(const CompilerInstance &CI, const std::vector<std::string>
     }
 
     if ( args[i] == "-emit-openacc" ) {
-      std::cerr << "emiting openacc" << std::endl;
+      LOGD << "emiting openacc" ;
       emit_code_type = CodeGenerationType::ACC;
     }
 
     if ( args[i] == "-emit-openmp" ) {
-      std::cerr << "emiting openmp" << std::endl;
+      LOGD << "emiting openmp" ;
       emit_code_type = CodeGenerationType::OMP;
     }
 
     if ( args[i] == "-emit-hpx" ) {
-      std::cerr << "emiting hpx" << std::endl;
+      LOGD << "emiting hpx" ;
       emit_code_type = CodeGenerationType::HPX;
     }
 
     if ( args[i] == "-emit-tbb" ) {
-      std::cerr << "emiting tbb" << std::endl;
+      LOGD << "emiting tbb" ;
       emit_code_type = CodeGenerationType::TBB;
     }
 
     if ( args[i] == "-emit-cilk" ) {
-      std::cerr << "emiting cilk" << std::endl;
+      LOGD << "emiting cilk" ;
       emit_code_type = CodeGenerationType::CILK;
     }
 
     // add new back-ends here 
 
     if ( args[i] == "-write-cloog-file" ) {
-      std::cerr << "writing cloog file" << std::endl;
+      LOGD << "writing cloog file" ;
       write_cloog_file = true;
     }
 
     if ( args[i] == "-redirect-stdout" ) {
-      std::cerr << "redirecting stdout" << std::endl;
+      LOGD << "redirecting stdout" ;
       next_arg = &redirect_stdout_file;
     }
 
     if ( args[i] == "-redirect-stderr" ) {
-      std::cerr << "redirecting stderr" << std::endl;
+      LOGD << "redirecting stderr" ;
       next_arg = &redirect_stderr_file;
     }
 
@@ -453,5 +467,6 @@ ClanAction::ParseArgs(const CompilerInstance &CI, const std::vector<std::string>
 
 } // namespace end
 
+// TODO change name
 static FrontendPluginRegistry::Add<ClanAction>
 X("clan", "run clan as part of the compiler");

@@ -7,11 +7,17 @@
 #include <isl/ctx.h>
 
 #include "pluto_compat.h"
+#include "plog/Log.h"
+
 #include <pluto_codegen_cxx.hpp>
 
 #include <cassert>
 
 #include <iostream>
+
+// disable logging for this file
+#undef LOGD
+#define LOGD LOGD_IF(false)
 
 using namespace std;
 
@@ -37,12 +43,12 @@ isl_set* rename_set( isl_set* set, std::vector<int>& rename_table ) {
 
   sprintf( new_name, "S_%d", rename_table[id] );
 
-  std::cerr << "renaming from " << name << " to " << new_name << std::endl;    
+  LOGD << "renaming from " << name << " to " << new_name ;    
 
   auto new_isl_set = isl_set_set_tuple_name(set, new_name );
   isl_set_dump( new_isl_set );
   const char *set_name = isl_set_get_tuple_name(new_isl_set);
-  std::cerr << "done renaming new name is " << set_name << std::endl;    
+  LOGD << "done renaming new name is " << set_name ;    
 
   return new_isl_set;
 }
@@ -74,34 +80,34 @@ isl_union_set* linearize_union_set( isl_space* space, isl_union_set* domains, st
 	  int new_numeric_id = rename_table[numeric_id];
 
 	  if ( new_numeric_id < 0 || new_numeric_id >= rename_table.size() ) { 
-	    std::cerr << "plugin: element was filtered" << std::endl;
+	    LOGD << "plugin: element was filtered" ;
 	    return (isl_stat)0;
 	  }
 
 	  sprintf( new_name, "S_%d", new_numeric_id );
-	  std::cerr << "renaming from " << name << " to " << new_name << std::endl;    
+	  LOGD << "renaming from " << name << " to " << new_name ;    
 
 	  isl_id* id = isl_set_get_tuple_id( set );
 	  void* id_user_data = isl_id_get_user( id );
 	  if ( id_user_data ) {
 	    StatementInformation* sinfo = (StatementInformation*)id_user_data;
-	    std::cerr << "text" << sinfo->statement_text << std::endl;
+	    LOGD << "text" << sinfo->statement_text ;
 	  }
-	  std::cerr << "old user data " << id_user_data << std::endl;
+	  LOGD << "old user data " << id_user_data ;
 
 	  isl_ctx* ctx = isl_id_get_ctx( id ) ;
 	  isl_id* new_id = isl_id_alloc( ctx, new_name, id_user_data );
 	  auto new_isl_set = isl_set_set_tuple_id( set, new_id );
 
 	  const char *set_name = isl_set_get_tuple_name(new_isl_set);
-	  std::cerr << "done renaming new name is " << set_name << std::endl;    
+	  LOGD << "done renaming new name is " << set_name ;    
 
 	  isl_union_set_add_set( user_data->new_set, new_isl_set );
 
 	  {
 	    isl_id* new_id = isl_set_get_tuple_id( new_isl_set );
 	    void* new_user_data = isl_id_get_user( new_id );
-	    std::cerr << "new user data " << new_user_data << std::endl;
+	    LOGD << "new user data " << new_user_data ;
 	  }
 	  return (isl_stat)0;    
       }, 
@@ -112,16 +118,16 @@ isl_union_set* linearize_union_set( isl_space* space, isl_union_set* domains, st
 
 isl_stat rename_map( isl_map* map, void* user ) { 
   map_rename_data* user_data = (map_rename_data*)(user);
-  std::cerr << __FILE__ << " " << __LINE__ << std::endl;
+  LOGD << __FILE__ << " " << __LINE__ ;
 
   auto rename = [&](isl_map* map, isl_dim_type t){
-    std::cerr << __FILE__ << " " << __LINE__ << std::endl;
+    LOGD << __FILE__ << " " << __LINE__ ;
     const char *name = isl_map_get_tuple_name(map,t);
     if ( name == nullptr ) {
-      std::cerr << "pluto compat: could not get the name for dim type " << t << std::endl;
+      LOGD << "pluto compat: could not get the name for dim type " << t ;
       return (isl_map*)nullptr;
     }
-    std::cerr << "tuple name is " << name << std::endl;
+    LOGD << "tuple name is " << name ;
 
     char *new_name = (char*)malloc(sizeof(const char) * 10 );
 
@@ -132,20 +138,20 @@ isl_stat rename_map( isl_map* map, void* user ) {
     int new_numeric_id = rename_table[numeric_id];
 
     if ( new_numeric_id < 0 || new_numeric_id >= rename_table.size() ) { 
-      std::cerr << "plugin: element was filtered" << std::endl;
+      LOGD << "plugin: element was filtered" ;
       return (isl_map*)nullptr;
     }
 
     sprintf( new_name, "S_%d", new_numeric_id );
-    std::cerr << "renaming from " <<  name << " to " << new_name << std::endl;    
+    LOGD << "renaming from " <<  name << " to " << new_name ;    
 
     isl_id* id = isl_map_get_tuple_id( map, t  );
     void* id_user_data = isl_id_get_user( id );
     if ( id_user_data ) {
       StatementInformation* sinfo = (StatementInformation*)id_user_data;
-      std::cerr << "text" << sinfo->statement_text << std::endl;
+      LOGD << "text" << sinfo->statement_text ;
     }
-    std::cerr << "old user data " << id_user_data << std::endl;
+    LOGD << "old user data " << id_user_data ;
 
     isl_ctx* ctx = isl_id_get_ctx( id ) ;
     isl_id* new_id = isl_id_alloc( ctx, new_name, id_user_data );
@@ -157,7 +163,7 @@ isl_stat rename_map( isl_map* map, void* user ) {
     isl_map_dump( new_isl_map );
 #endif
     const char *set_name = isl_map_get_tuple_name(new_isl_map, t );
-    std::cerr << "done renaming" << std::endl;    
+    LOGD << "done renaming" ;    
     return new_isl_map;
   };
 
@@ -170,12 +176,12 @@ isl_stat rename_map( isl_map* map, void* user ) {
     return (isl_stat)0;
   }
 
-  std::cerr << __FILE__ << " " << __LINE__ << std::endl;
+  LOGD << __FILE__ << " " << __LINE__ ;
   return (isl_stat)0;    
 }
 
 isl_union_map* linearize_union_map( isl_space* space, isl_union_map* map, std::vector<int>& rename_table){
-  std::cerr << __FILE__ << " " << __LINE__ << std::endl;
+  LOGD << __FILE__ << " " << __LINE__ ;
   map_rename_data user_data;
   isl_union_map* new_map = isl_union_map_empty( space );
   user_data.new_map = new_map; 
@@ -186,7 +192,7 @@ isl_union_map* linearize_union_map( isl_space* space, isl_union_map* map, std::v
       &user_data
   ); 
 
-  std::cerr << __FILE__ << " " << __LINE__ << std::endl;
+  LOGD << __FILE__ << " " << __LINE__ ;
   return new_map;
 }
 
