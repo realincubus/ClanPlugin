@@ -175,10 +175,9 @@ std::string getSourceText( SourceLocation starts_with,
 }
 
 // search it by scanning this decl group for the source location // might be very slow
-void ClangPetInterface::replace_with_placeholder( 
+std::string ClangPetInterface::replace_with_placeholder( 
     pet_loc* loc, 
-    std::vector<NamedDecl*>& parameters, 
-    std::vector<std::string>& statement_texts ) {
+    std::vector<NamedDecl*>& parameters ) {
 
   // translate this to a source locations 
   std::cerr << "statement at " << pet_loc_get_start(loc) << " to " << pet_loc_get_end( loc ) << std::endl;
@@ -191,26 +190,49 @@ void ClangPetInterface::replace_with_placeholder(
   DeclRefVisitor visitor(parameters, begin_stmt, end_stmt, SM);
   visitor.TraverseStmt( (ForStmt*)for_stmt );
 
-  auto res = getSourceText(begin_stmt, visitor.exclude_ranges, end_stmt, SM );
-  statement_texts.push_back( res );
+  return getSourceText(begin_stmt, visitor.exclude_ranges, end_stmt, SM );
 }
 
+// TODO this is not very save. replace this in the future 
 // returns the statements with some placeholders so that the iterators can be replaced with new iterator names  
+// all statements need to be sorted by their domain name S_0 S_1 S_2 ... 
 std::vector<std::string> ClangPetInterface::get_statement_texts( pet_scop* scop )
 {
 
-  std::vector<std::string> statement_texts;
+  std::vector<std::pair<std::string, std::string>> domain_text_list;
+
   // loop over all statements 
   for (int i = 0; i < scop->n_stmt; ++i){
     pet_stmt* stmt = scop->stmts[i];
+    isl_set* domain = stmt->domain;
 
     auto parameters = get_parameters_for_pet_stmt( stmt );
 	
     pet_loc* loc = stmt->loc;
     // replace the iterator name in this string with a placeholder
-    replace_with_placeholder( loc, parameters, statement_texts );
+    auto text = replace_with_placeholder( loc, parameters );
+
+    std::cerr << "isl_domain: "  << std::endl;
+    isl_set_dump( domain );
+    std::cerr << "got text: " << text << std::endl;
+
+    const char* tname = isl_set_get_tuple_name( domain );
+
+    domain_text_list.emplace_back( tname, text );
     
   } // loop over all statements
+
+  // sort by domain name
+  std::vector<std::string> statement_texts;
+
+  std::sort( begin(domain_text_list), end(domain_text_list), [](auto a , auto b){ return a.first < b.first; } );
+
+  for( auto& element : domain_text_list ){
+    statement_texts.push_back( element.second );
+  }
+  
+
+
 
   return statement_texts;
 }

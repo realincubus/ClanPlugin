@@ -639,11 +639,11 @@ PlutoCompatData Dependences::make_pluto_compatible( std::vector<int>& rename_tab
     pcd.schedule = linearize_union_map( space, pcd.schedule, rename_table );
     pcd.reads = linearize_union_map( space, pcd.reads, rename_table );
     pcd.writes = linearize_union_map( space, pcd.writes, rename_table );
-    pcd.domains = linearize_union_set( space, pcd.domains, rename_table );
     pcd.raw = linearize_union_map( space, pcd.raw, rename_table );
     pcd.war = linearize_union_map( space, pcd.war, rename_table );
     pcd.waw = linearize_union_map( space, pcd.waw, rename_table );
     pcd.red = linearize_union_map( space, pcd.red, rename_table );
+    pcd.domains = linearize_union_set( space, pcd.domains, rename_table );
   }
   std::cerr << "writes after rename" << std::endl;
   isl_union_map_dump(pcd.writes);
@@ -975,8 +975,8 @@ static bool is_killed(
   return std::get<4>(ksad);
 }
 
-// the schedule, the write statements, the kill_statements ...
-typedef std::tuple< isl_schedule*, isl_union_map*, isl_union_map* > KillStatementsData;
+// the schedule, the write statements, the kill_statements, the new map ...
+typedef std::tuple< isl_schedule*, isl_union_map*, isl_union_map*, isl_union_map* > KillStatementsData;
 
 static isl_stat considerKillStatementsForMap( isl_map* map, void* user ) {
 
@@ -984,6 +984,7 @@ static isl_stat considerKillStatementsForMap( isl_map* map, void* user ) {
   isl_schedule* schedule = std::get<0>(*kill_statements_data);
   isl_union_map* writes = std::get<1>(*kill_statements_data);
   isl_union_map* kill_statements = std::get<2>(*kill_statements_data);
+  isl_union_map* new_map = std::get<3>(*kill_statements_data);
 
   // i need source and targets from the map 
   auto source = get_source_from_map( isl_map_copy(map) );
@@ -1032,6 +1033,8 @@ static isl_stat considerKillStatementsForMap( isl_map* map, void* user ) {
       if ( isKilled ) {
 	std::cerr << "the write operation was killed by a kill statement on route to the destination"
 	 << " you can delete this dependency" << std::endl;
+	// return prematurely to not add this map to the new union map
+	return (isl_stat)0;
       }
     }
 
@@ -1039,6 +1042,8 @@ static isl_stat considerKillStatementsForMap( isl_map* map, void* user ) {
     std::cerr << "can not handle multiple writes in one statement -> not implemented" << std::endl;
     exit(-1);
   }
+
+  isl_union_map_add_map( new_map, map );
 
   return (isl_stat)0; 
 }
@@ -1049,13 +1054,19 @@ isl_union_map* Dependences::considerKillStatements( isl_union_map* DEPS,
     isl_union_map* kill_statements 
 ){
   std::cerr << __PRETTY_FUNCTION__ << " begin " << std::endl;
-  KillStatementsData ksd = std::make_tuple( schedule, writes, kill_statements );
+  isl_space* space = isl_union_map_get_space( DEPS );
+  isl_union_map* new_deps = isl_union_map_empty( space );
+  KillStatementsData ksd = std::make_tuple( schedule, writes, kill_statements, new_deps );
   // iterate over all dependencies
   isl_union_map_foreach_map( DEPS , &considerKillStatementsForMap, &ksd );
 
   std::cerr << __PRETTY_FUNCTION__ << " end " << std::endl;
+  std::cerr << "old deps:" << std::endl;
+  isl_union_map_dump( DEPS );
+  std::cerr << "new deps:" << std::endl;
+  isl_union_map_dump( std::get<3>(ksd ) );
 
-  return DEPS;
+  return std::get<3>(ksd);
 }
 
 

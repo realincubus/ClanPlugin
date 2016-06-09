@@ -120,7 +120,7 @@ public:
     int OptComputeOut = 500000;
 
     AnalysisType OptAnalysisType = VALUE_BASED_ANALYSIS;
-    bool OptKillStatementAnalysis = false;
+    bool OptKillStatementAnalysis = true;
 
     Scop scop;
     

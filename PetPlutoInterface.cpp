@@ -206,7 +206,7 @@ struct PlutoRedcutionVariableInfo {
 
 
 
-// TODO make all of this get the information from statement_map and call_map or however they are called
+// make all of this get the information from statement_map and call_map or however they are called
 static isl_stat add_info_to_id( __isl_take isl_set* set, void* user ) {
 
   auto user_data = (AddInfoHelper*) user;
@@ -223,6 +223,7 @@ static isl_stat add_info_to_id( __isl_take isl_set* set, void* user ) {
 
     auto ctx = isl_id_get_ctx( tuple_id );
     StatementInformation* sinfo = new StatementInformation();
+    std::cerr << "ppi: adding text: " << statement_text << " to id " << id << " at ptr " << sinfo <<  std::endl;
 
     // add information from the statement table 
     sinfo->statement_text = statement_text;

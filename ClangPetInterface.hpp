@@ -26,10 +26,9 @@ public:
 private:
 
 
-    void replace_with_placeholder( 
+    std::string replace_with_placeholder( 
       pet_loc* loc, 
-      std::vector<clang::NamedDecl*>& parameters, 
-      std::vector<std::string>& statement_texts 
+      std::vector<clang::NamedDecl*>& parameters
     );
 
     clang::ASTContext& ctx_clang;
