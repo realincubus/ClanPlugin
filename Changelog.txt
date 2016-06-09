@@ -1,0 +1,40 @@
+= Plugin Changelog = 
+
+= Road Map = 
+
+# implement kill statement anaylsis
+# reduction unparser for cilk tbb hpx
+# make it possible to use iterators in c++ code
+
+
+== Version 0.01 == 
+
+- codegen
+  - can emit files to include 
+  - files are not included twice
+- plugin
+ - has a basic help printout
+ - major refacroring has improved modularity
+ - information about statements is now passed via isl_ids user data pointer
+- dependency analysis
+ - is no based on pollys dependency analysis and supports reductions
+ - plutos analysis is still available
+- pet
+ - can now analyse for different reduction types ( + , * ... )
+ - understands auto type 
+- containers ( docker )
+ - full upload of all containers to dockerhub scheduled every 2 days
+ - build works without python3 
+
+
+== Version 0.00 ==
+
+- in contrast to older approaches the new plugin uses
+ - pet as a polyhedral scanner
+ - pluto as an optimizer
+ - customized unparsing code in pluto for generating
+    - hpx
+    - cilk 
+    - openmp
+    - openacc
+    - tbb
