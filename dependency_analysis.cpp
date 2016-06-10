@@ -791,16 +791,16 @@ static isl_bool find_set_in_schedule( isl_schedule_node* node, void* user ) {
       auto* result = isl_union_set_intersect( isl_union_set_from_set(isl_set_copy(set)), filter );
       if ( isl_union_set_is_empty( result ) ){
 	isl_union_set_free( result );
-	LOGD << "this set does not contain this set" ;
+	LOGV << "this set does not contain this set" ;
       }else{
 	isl_union_set_free( result );
-	LOGD << "this set DOES contain this set" ;
+	LOGV << "this set DOES contain this set" ;
 	fr->second = isl_schedule_node_copy(node);
 	// stop recursing
 	return (isl_bool)0;
       }
     }else{
-      LOGD << "not considering this node since it has to have subnodes" ;
+      LOGV << "not considering this node since it has to have subnodes" ;
     }
   }
   return (isl_bool)1; 
@@ -925,37 +925,50 @@ static isl_bool find_kill_statement( isl_schedule_node* node, void* user ) {
   // and if this statement kills the range we are looking for 
   // set the kill flag to true
   if ( source_found && !is_killed ) {
-    LOGD << "checking for killstatement " ;
+    LOGV << "checking for killstatement " ;
     isl_union_map* kill_statements = std::get<2>(*ksad);
-    LOGD << "kill statements are: " ;
+    LOGV << "kill statements are: " ;
     isl_union_map_dump( kill_statements );
-    LOGD << "intersecting with filter: ";
+    LOGV << "intersecting with filter: ";
     isl_union_set_dump( filter );
     isl_union_map* kills = isl_union_map_intersect_domain( isl_union_map_copy(kill_statements), filter ); 
-    LOGD << "kills are:" ;
+    LOGV << "kills are:" ;
     isl_union_map_dump( kills );
 
     // check wether this statement is a kill_statement 
     if ( !isl_union_map_is_empty( kills ) ){
       // has to be one element
       if ( isl_union_map_n_map( kills ) != 1 ) {
-	LOGD << "union map has != 1 element cant handle this" ;
+	LOGV << "union map has != 1 element cant handle this" ;
 	exit(-1);
       }
 
       isl_set* range = std::get<3>(*ksad);
-      LOGD << "checking range:" ;
+      LOGV << "checking range:" ;
       isl_set_dump( range );
       isl_map* kill = isl_map_from_union_map( kills );
       isl_set* kill_range = isl_map_range( kill );
-      LOGD << "with kill range:"  ;
+      LOGV << "with kill range:"  ;
       isl_set_dump( kill_range );
       
+      isl_space* kill_space = isl_set_get_space(kill_range);
+      LOGV << "kill range has following space";
+      isl_space_dump( kill_space );
+
+      isl_space* range_space = isl_set_get_space(range);
+      LOGV << "range has following space";
+      isl_space_dump( range_space );
+
       // now check that both ranges are the same 
-      if ( isl_set_is_equal( range, kill_range ) ) {
-	LOGD << "both ranges are identical setting is_killed true" ;
+      // TODO for arrays this does not work like expected 
+      //isl_set* is_same = isl_set_intersect( isl_set_copy(range), kill_range );
+      //if ( isl_set_is_empty( is_same ) ) {
+      if ( isl_space_is_equal( range_space, kill_space ) ) {
+	LOGV << "both ranges are identical setting is_killed true" ;
 	is_killed = true;
 	return (isl_bool)0;
+      }else{
+	LOGV << "ranges are not identical";
       }
     }
   }
@@ -1000,10 +1013,14 @@ static isl_stat considerKillStatementsForMap( isl_map* map, void* user ) {
 
   if ( !schedule_node_source ) {
     LOGD << "did not get schedule node for source" ;
+    isl_union_map_add_map( new_map, map );
+    return (isl_stat)0;
   }
 
   if ( !schedule_node_destination ) {
     LOGD << "did not get schedule node for destination" ;
+    isl_union_map_add_map( new_map, map );
+    return (isl_stat)0;
   }
 
   // the destination is the write statement in a write after read
@@ -1011,6 +1028,7 @@ static isl_stat considerKillStatementsForMap( isl_map* map, void* user ) {
 
   // get the entry from the writes 
   isl_union_map* filtered_writes = isl_union_map_intersect_domain( isl_union_map_copy(writes), filter );
+  LOGD << "filter statement is ";
   isl_union_map_dump( filtered_writes );
 
   // since its possible that there are multiple writes in the same statement ( althoug c and c++ forbid this )
@@ -1019,6 +1037,7 @@ static isl_stat considerKillStatementsForMap( isl_map* map, void* user ) {
 
     // get the range from this map ( its the thing the statement is writing on )
     isl_set* range = isl_map_range( filtered_write );
+    LOGD << "filter range is:";
     isl_set_dump ( range );
 
     // if the source statement is before the destination statement its ok 
