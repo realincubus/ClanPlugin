@@ -301,6 +301,10 @@ void Dependences::calculateDependences( Scop& S ){
       WAR = considerKillStatements( WAR, Schedule, Write, KillStatements ) ;
     }
 
+    if ( OptKillStatementAnalysis ) {
+      WAW = considerKillStatements( WAW, Schedule, Write, KillStatements ) ;
+    }
+
     isl_union_flow_free(Flow);
     isl_schedule_free(Schedule);
   } else {
