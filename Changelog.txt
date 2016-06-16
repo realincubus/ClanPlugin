@@ -2,10 +2,27 @@
 
 = Road Map = 
 
-# implement kill statement anaylsis
+# improve kill statement analysis
+ - needs to be better for 2d 
+ - needs to understand scopes otherwise a fuse will result in a redeclaration
 # reduction unparser for cilk tbb hpx
 # make it possible to use iterators in c++ code
 
+== Version 0.02 == 
+- interface plugin
+ - it analyzes the outermost loops now ( before all levels )
+- codegen
+ - tested isls codegen based on a schedule and a set of parameters 
+- dependency analysis 
+ - basic kill statement analysis for 1d loops implemented
+ - problems with: 
+  - 2d loops
+  - separation of declaration and usage
+  - wrong fuse of scopes ( region between braces )
+- container ( docker )
+ - updated user interface to make it possible to:
+  - change the unparser ( cilk, hpx, tbb, openmp, openacc ) by pressing F1, F2, ...
+  - apply a fixit by pressing F7
 
 == Version 0.01 == 
 

@@ -421,10 +421,6 @@ bool PetPlutoInterface::create_scop_replacement(
   pluto_options->fuse = MAXIMAL_FUSE;
   pluto_options->intratileopt = false;
   pluto_options->prevector = false;
-  pluto_options->ft = 20;
-  pluto_options->lt = 20;
-  pluto_options->cloogf = 20;
-  pluto_options->cloogl = 20;
   pluto_options->cloogbacktrack = true;
   //pluto_options->multipar = 1;
   //pluto_options->identity = true;
