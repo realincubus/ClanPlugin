@@ -66,6 +66,7 @@ public:
       IslCtx = getContext( pscop ) ;
 
       calculateDependences( scop );
+      codegen();
     }
     virtual ~Dependences () {}
 
@@ -91,6 +92,9 @@ public:
                         isl_union_map **StmtSchedule,
 			isl_union_map **KillStatements,
                         Dependences::AnalyisLevel Level);
+
+    // TODO move to own class if test is successful
+    void codegen();
 
     isl_ctx* getContext( pet_scop* pscop );
     void addPrivatizationDependences();

@@ -81,7 +81,7 @@ class Callback : public MatchFinder::MatchCallback {
 
 		 LOGD << "emitting diagnositc" ;
 		 DiagnosticsEngine& diag = context.getDiagnostics();
-		 unsigned DiagID = diag.getCustomDiagID(DiagnosticsEngine::Warning, "found a scop");
+		 unsigned DiagID = diag.getCustomDiagID(DiagnosticsEngine::Warning, "found a loop to optimize - press F7 to apply");
 		 LOGD << "got id " << DiagID ;
 
 		 auto replacement = pp_interface.getReplacement();
@@ -234,9 +234,9 @@ public:
     return functionDecl(
 	forEachDescendant(
 	  forStmt(
-#if 0
+#if 1
 	    unless(
-	      hasDescendant(
+	      hasAncestor(
 		forStmt()
 	      )
 	    )

@@ -283,13 +283,6 @@ void Dependences::calculateDependences( Scop& S ){
     WAW = isl_union_flow_get_must_dependence(Flow);
     WAR = isl_union_flow_get_may_dependence(Flow);
 
-    LOGD << "raw" ;
-    isl_union_map_dump( RAW );
-    LOGD << "war" ;
-    isl_union_map_dump( WAR );
-    LOGD << "waw" ;
-    isl_union_map_dump( WAW );
-
     // This subtraction is needed to obtain the same results as were given by
     // isl_union_map_compute_flow. For large sets this may add some compile-time
     // cost. As there does not seem to be a need to distinguish between WAW and
@@ -297,11 +290,20 @@ void Dependences::calculateDependences( Scop& S ){
     // improve performance.
     WAR = isl_union_map_subtract(WAR, isl_union_map_copy(WAW));
 
+    LOGD << "raw" ;
+    isl_union_map_dump( RAW );
+    LOGD << "war" ;
+    isl_union_map_dump( WAR );
+    LOGD << "waw" ;
+    isl_union_map_dump( WAW );
+
     if ( OptKillStatementAnalysis ) {
+      LOGD << "deleting paths by kills for WAR";
       WAR = considerKillStatements( WAR, Schedule, Write, KillStatements ) ;
     }
 
     if ( OptKillStatementAnalysis ) {
+      LOGD << "deleting paths by kills for WAW";
       WAW = considerKillStatements( WAW, Schedule, Write, KillStatements ) ;
     }
 
@@ -1084,14 +1086,35 @@ isl_union_map* Dependences::considerKillStatements( isl_union_map* DEPS,
   // iterate over all dependencies
   isl_union_map_foreach_map( DEPS , &considerKillStatementsForMap, &ksd );
 
-  LOGD << __PRETTY_FUNCTION__ << " end " ;
   LOGD << "old deps:" ;
   isl_union_map_dump( DEPS );
   LOGD << "new deps:" ;
   isl_union_map_dump( std::get<3>(ksd ) );
+  LOGD << __PRETTY_FUNCTION__ << " end " ;
 
   return std::get<3>(ksd);
 }
+
+
+// TODO tests isl ast generation
+void Dependences::codegen(){
+
+  LOGD << "building isl ast from context";
+  auto build = isl_ast_build_from_context(isl_set_universe(scop.getParamSpace()));
+  LOGD << "building isl ast from schedule";
+  auto node = isl_ast_build_node_from_schedule( build, isl_schedule_copy(scop.getSchedule()) );
+
+  // a printer to stderr
+  auto printer = isl_printer_to_file( IslCtx, stderr );
+  printer = isl_printer_set_output_format( printer, ISL_FORMAT_C );
+
+  printer = isl_printer_print_ast_node( printer, node );
+
+
+
+}
+
+
 
 
 

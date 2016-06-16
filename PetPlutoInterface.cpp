@@ -296,6 +296,8 @@ PlutoProg* PetPlutoInterface::compute_deps(
   // build the data that will not be linear
   auto pluto_compat_data = dependences.build_pluto_data( );
 
+    
+
   LOGD << "plugin: adding info to ids (non compatible) " ;
   // add information that corresponds to this data
   pluto_compat_data.domains = add_extra_infos_to_ids( isl_set_get_space(pscop->context), 
@@ -357,6 +359,8 @@ PlutoProg* PetPlutoInterface::compute_deps(
       reduction_variables_for_tuple_names
     );
 
+
+
     return pluto_compute_deps( schedule,
 			       read,
 			       write,
@@ -413,6 +417,17 @@ bool PetPlutoInterface::create_scop_replacement(
   pluto_options->parallel = true;
   pluto_options->debug = true;
   pluto_options->isldep = true;
+  pluto_options->tile = false;
+  pluto_options->fuse = MAXIMAL_FUSE;
+  pluto_options->intratileopt = false;
+  pluto_options->prevector = false;
+  pluto_options->ft = 20;
+  pluto_options->lt = 20;
+  pluto_options->cloogf = 20;
+  pluto_options->cloogl = 20;
+  pluto_options->cloogbacktrack = true;
+  //pluto_options->multipar = 1;
+  //pluto_options->identity = true;
 
   LOGD << "generating pluto program from pet" ;
   auto prog = pet_to_pluto_prog(scop, pluto_options, statement_texts, call_texts);
