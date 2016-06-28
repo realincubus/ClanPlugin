@@ -46,6 +46,8 @@ public:
       return replacement;
     }
 
+    std::vector<std::tuple<int,int,std::string>> pet_expanations;
+
 protected:
 
 

@@ -100,6 +100,7 @@ public:
     void addPrivatizationDependences();
     void setReductionDependences(MemoryAccess *MA, isl_map *D);
 
+    unsigned int getSourceLocationByTupleName( std::string );
 
     bool UseReductions = true;
 

@@ -1114,13 +1114,8 @@ void Dependences::codegen(){
 
 }
 
-
-
-
-
-
-
-
-
-
-
+unsigned int 
+Dependences::getSourceLocationByTupleName( std::string tuple_name ){
+  auto* s = scop.getStmtByTupleName( tuple_name );
+  return s->getSourceLocation();
+}

@@ -60,8 +60,16 @@ isl_map* ScopStmt::getSchedule(){
 }
 
 std::string ScopStmt::getTupleName(){
-      auto domain = getDomain();
-      const char* name = isl_set_get_tuple_name( domain );
-      isl_set_free( domain );
-      return name;
-    }
+  auto domain = getDomain();
+  const char* name = isl_set_get_tuple_name( domain );
+  isl_set_free( domain );
+  return name;
+}
+
+unsigned int 
+ScopStmt::getSourceLocation(){
+  auto loc = stmt->loc;
+  return pet_loc_get_start(loc);
+}
+
+

@@ -3,6 +3,7 @@
 #include "PetPlutoInterface.hpp"
 #include "dependency_analysis.h"
 #include "pluto_codegen_cxx.hpp"
+#include "pluto_cxx.hpp"
 #include "pluto_compat.h"
 #include "pet_cxx.h"
 #include "pet.h"
@@ -379,9 +380,7 @@ PlutoProg* PetPlutoInterface::compute_deps(
 
 
 PlutoProg* PetPlutoInterface::pet_to_pluto_prog(pet_scop* scop, PlutoOptions* pluto_options, std::vector<std::string>& statement_texts ,std::unique_ptr<std::map<std::string,std::string>>& call_texts ){
-  PlutoProg* prog =  compute_deps( scop, pluto_options, statement_texts, call_texts ) ;
-  LOGD << "plugin: pluto program generated"  ;
-  return prog;
+  return nullptr;
 }
 
 static pluto_codegen_cxx::EMIT_CODE_TYPE to_pluto_emit_type( CodeGenerationType cgt ) {
@@ -426,7 +425,105 @@ bool PetPlutoInterface::create_scop_replacement(
   //pluto_options->identity = true;
 
   LOGD << "generating pluto program from pet" ;
-  auto prog = pet_to_pluto_prog(scop, pluto_options, statement_texts, call_texts);
+
+  pet_scop* pscop = scop;
+
+  LOGD << "plugin: building rename table" ;
+  isl_union_set* domains = collect_non_kill_domains( pscop );
+  std::vector<int> rename_table;
+  build_rename_table( domains, rename_table );
+  LOGD << "plugin: done building rename table" ;
+
+  LOGD << "plugin: starting to calculate the dependencies" ;
+  Dependences dependences( pscop );
+
+  auto reduction_variables_for_tuple_names = dependences.find_reduction_variables();
+  LOGD << "plugin: r vars from dep ana " << reduction_variables_for_tuple_names.size() ;
+
+  LOGD << "plugin: building pluto data (non compatible) " ;
+  // build the data that will not be linear
+  auto pluto_compat_data = dependences.build_pluto_data( );
+
+    
+
+  LOGD << "plugin: adding info to ids (non compatible) " ;
+  // add information that corresponds to this data
+  pluto_compat_data.domains = add_extra_infos_to_ids( isl_set_get_space(pscop->context), 
+      pluto_compat_data.domains, 
+      statement_texts, 
+      call_texts,
+      reduction_variables_for_tuple_names
+  );
+
+  LOGD << "plugin: making pluto data compatible" ;
+  // reorder all to make it pluto compatible
+  dependences.make_pluto_compatible( rename_table, pluto_compat_data );
+
+  PlutoProg* prog = nullptr;
+
+  if ( dependency_analysis_style == DependencyAnalysisType::PollyLike ) {
+    LOGD << "plugin: calling pluto_compute_deps" ;
+    // TODO the kill statements are not respected in isls dependency analysis 
+    //      this needs to be taken into account in order to make scoped variables work like expected
+    prog = pluto_compute_deps( 
+	pluto_compat_data.schedule, 
+	pluto_compat_data.reads, 
+	pluto_compat_data.writes, 
+	pluto_compat_data.empty, 
+	pluto_compat_data.domains, 
+	pluto_compat_data.context, 
+	pluto_options, 
+	pluto_compat_data.raw,  
+	pluto_compat_data.war,  
+	pluto_compat_data.waw,  
+	pluto_compat_data.red 
+    );
+  }else{
+    LOGD << "pet_pluto_interface: using pluto to calculate dependencies"  ;
+    isl_union_map* schedule= isl_schedule_get_map(pscop->schedule);
+    isl_union_map* read = pet_scop_collect_may_reads(pscop);
+    isl_union_map* write = pet_scop_collect_must_writes(pscop);
+    isl_union_map* empty = isl_union_map_empty(isl_set_get_space(pscop->context));
+    isl_set* context = isl_set_copy(pscop->context);
+
+    auto space = isl_set_get_space( pscop->context );
+
+    if ( rename_table.size() > 0 ) {
+      domains = linearize_union_set( space, domains, rename_table );
+      schedule = linearize_union_map( space, schedule, rename_table );
+      read = linearize_union_map( space, read, rename_table );
+      write = linearize_union_map( space, write, rename_table );
+      empty = linearize_union_map( space, empty, rename_table );
+    }
+
+    reduction_variables_for_tuple_names.clear();
+
+    domains = add_extra_infos_to_ids( 
+      isl_set_get_space(pscop->context),  
+      domains, 
+      statement_texts, 
+      call_texts,
+      reduction_variables_for_tuple_names
+    );
+
+
+
+    prog = pluto_compute_deps( schedule,
+			       read,
+			       write,
+			       empty,
+			       domains,
+			       context,
+			       pluto_options,
+			       nullptr,
+			       nullptr,
+			       nullptr,
+			       nullptr
+    );
+  }
+
+  LOGD << "plugin: pluto program generated"  ;
+
   if ( !prog ) {
     LOGD << "could not generate a pluto program from the given pet_scop" ;
     // TODO memory leak put everything into unique_ptr
@@ -448,6 +545,47 @@ bool PetPlutoInterface::create_scop_replacement(
 
   if ( parallel_loops <= 0 ) {
     LOGD << "loop is not parallel" ;
+
+    // TODO lets walk through the pluto prog and find if there are
+    // explanations for the non parallelity
+
+    auto explanations = pluto_cxx::pluto_get_dep_explanations(prog);
+
+    auto to_pet_id = []( auto rename_table, int pluto_id ) {
+      if ( rename_table.size() > 0 ) {
+	for (int i = 0; i < rename_table.size(); ++i){
+	  if ( rename_table[i] == pluto_id ) {
+	    return i;
+	  }
+	}
+      }else{
+	return pluto_id;
+      }
+    };
+
+    for( auto& element : explanations ){
+
+      // get the statement pluto_id in pets data
+      int pet_src_id = to_pet_id( rename_table, std::get<0>(element) );
+      int pet_dest_id = to_pet_id( rename_table, std::get<1>(element) );
+
+      std::cerr << "pet_src_id " << pet_src_id << " pet_dest_id " << pet_dest_id << " "  << std::get<2>(element) << std::endl;
+
+      unsigned int pet_src_stmt_offset = dependences.getSourceLocationByTupleName( "S_"s + to_string(pet_src_id) );
+      unsigned int pet_dest_stmt_offset = dependences.getSourceLocationByTupleName( "S_"s + to_string(pet_dest_id) );
+
+      std::cerr << "pet_src_stmt_offset " << pet_src_stmt_offset << std::endl;
+      std::cerr << "pet_dest_stmt_offset " << pet_dest_stmt_offset << std::endl;
+
+      pet_expanations.emplace_back( pet_src_stmt_offset, pet_dest_stmt_offset, std::get<2>(element) );
+
+    }
+
+    // TODO i have plutos view of the dependence now 
+    // need to map this back to the actual line or even better the the read access that caused the dependency
+    // TODO in addition  
+    
+
 #if 0
     // TODO emit diagnostic on why its not parallel
     // TODO run sequential STL algorithm matcher 
@@ -466,13 +604,11 @@ bool PetPlutoInterface::create_scop_replacement(
 
   pet_scop_dump( scop );
 
-  //auto call_texts = get_call_texts( scop , sloc_file, SM, for_stmt );
-
   std::stringstream outfp;
   auto begin_codegen = std::chrono::high_resolution_clock::now();
 
   if ( pluto_codegen_cxx::pluto_multicore_codegen( outfp, prog, statement_texts, to_pluto_emit_type(emit_code_type), write_cloog_file, *call_texts, header_includes ) == EXIT_FAILURE ) {
-    // stop if codegeneration failed
+    // TODO stop if codegeneration failed
     return "";
   }
 

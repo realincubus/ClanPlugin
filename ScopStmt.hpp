@@ -32,6 +32,8 @@ public:
 
     std::string getTupleName();
 
+    unsigned int getSourceLocation();
+
 private:
 
   pet_stmt* stmt = nullptr;  

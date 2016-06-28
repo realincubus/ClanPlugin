@@ -90,6 +90,17 @@ class Callback : public MatchFinder::MatchCallback {
 		 // replace the for statement
 		 diag.Report(begin_scop, DiagID) << FixItHint::CreateReplacement(for_stmt->getSourceRange(), replacement.c_str() );
 		 LOGD << "reported error " << DiagID ;
+	       }else{
+		 // TODO this is the point to emit information about why it was not possible to 
+		 // parallelize this loop
+		 for( auto& pet_explanation : pp_interface.pet_expanations ){
+
+		   auto clang_src_loc = cp_interface.getLocRelativeToFileBegin( std::get<0>(pet_explanation) );
+
+		   DiagnosticsEngine& diag = context.getDiagnostics();
+		   unsigned DiagID = diag.getCustomDiagID(DiagnosticsEngine::Warning, "Dependency: %0" );
+		   diag.Report(clang_src_loc, DiagID) << std::get<2>(pet_explanation) ;
+		 }
 	       }
 
 	     }

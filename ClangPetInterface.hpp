@@ -21,6 +21,7 @@ public:
     ); 
 
     clang::SourceLocation getLocBeginOfScop( );
+    clang::SourceLocation getLocRelativeToFileBegin( unsigned int loc );
     std::vector<std::string> get_statement_texts( pet_scop* scop );
 
 private:

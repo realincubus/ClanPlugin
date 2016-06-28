@@ -275,6 +275,12 @@ ClangPetInterface::getLocBeginOfScop( ) {
  return sloc_file.getLocWithOffset( pet_loc_get_start(loc) );
 }
 
+clang::SourceLocation 
+ClangPetInterface::getLocRelativeToFileBegin( unsigned int loc ){
+ return sloc_file.getLocWithOffset( loc );
+}
+
+
 ClangPetInterface::ClangPetInterface(clang::ASTContext& _ctx, const clang::ForStmt* _for_stmt) : 
   ctx_clang(_ctx),
   SM(ctx_clang.getSourceManager()),
