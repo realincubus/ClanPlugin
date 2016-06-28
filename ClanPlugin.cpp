@@ -282,11 +282,13 @@ public:
   void add_missing_includes(Callback& Fixer, ASTContext& clang_ctx) {
     for( auto& header : Fixer.header_includes ){
 
+      // dont add if the header is already included
       if ( isHeaderAlreadyIncluded( header, clang_ctx ) ) continue;
 
-      // TODO dont add if the header is already included
       // TODO skip the lines that begin with a comment 
       //      this way its possible to skip licences that are mostly at the beginning of a file
+      // TODO perhaps search for a marker that the user can add to the file 
+      //      might be better to add the includes there if the user has to ensure a certain order of includes
       auto& SM = clang_ctx.getSourceManager();
       auto fid = SM.getMainFileID();
       auto line = 1;

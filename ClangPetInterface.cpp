@@ -202,6 +202,8 @@ std::vector<std::string> ClangPetInterface::get_statement_texts( pet_scop* scop 
 
   std::vector<std::pair<std::string, std::string>> domain_text_list;
 
+  // TODO at the begin this has to be the brace of the enclosing block
+  //clang::SourceLocation last_loc;
   // loop over all statements 
   for (int i = 0; i < scop->n_stmt; ++i){
     pet_stmt* stmt = scop->stmts[i];

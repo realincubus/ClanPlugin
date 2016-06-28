@@ -4,9 +4,18 @@
 
 # improve kill statement analysis
  - needs to be better for 2d 
- - needs to understand scopes otherwise a fuse will result in a redeclaration
-# reduction unparser for cilk tbb hpx
+ - needs to understand scopes otherwise a use will result in a redeclaration
+# reduction unparser for hpx
 # make it possible to use iterators in c++ code
+
+== Version 0.03 == 
+- due to ISC2016 just some minor changes 
+- codegen
+ - reduction codegen works for  
+  - cilk 
+  - tbb
+  - hpx needs some other approach
+
 
 == Version 0.02 == 
 - interface plugin
