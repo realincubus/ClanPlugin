@@ -95,7 +95,8 @@ class Callback : public MatchFinder::MatchCallback {
 		 // parallelize this loop
 		 for( auto& pet_explanation : pp_interface.pet_expanations ){
 
-		   auto clang_src_loc = cp_interface.getLocRelativeToFileBegin( std::get<0>(pet_explanation) );
+		   unsigned int loc = std::get<0>(pet_explanation);
+		   auto clang_src_loc = cp_interface.getLocRelativeToFileBegin( loc );
 
 		   DiagnosticsEngine& diag = context.getDiagnostics();
 		   unsigned DiagID = diag.getCustomDiagID(DiagnosticsEngine::Warning, "Dependency: %0" );

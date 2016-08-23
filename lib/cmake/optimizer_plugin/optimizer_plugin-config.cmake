@@ -9,7 +9,7 @@ if (OPTIMIZER_PLUGIN_LIBRARY)
 	set(OPTIMIZER_PLUGIN_FIND_QUIETLY TRUE)
 endif()
 
-find_library(OPTIMIZER_PLUGIN_LIBRARY NAMES ClanPlugin.so)
+find_library(OPTIMIZER_PLUGIN_LIBRARY NAMES lib/ClanPlugin.so)
 
 if (OPTIMIZER_PLUGIN_LIBRARY)
 	message(STATUS "Library optimizer_plugin found =) ${OPTIMIZER_PLUGIN_LIBRARY}")

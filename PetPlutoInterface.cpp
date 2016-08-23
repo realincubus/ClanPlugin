@@ -609,7 +609,7 @@ bool PetPlutoInterface::create_scop_replacement(
 
   if ( pluto_codegen_cxx::pluto_multicore_codegen( outfp, prog, statement_texts, to_pluto_emit_type(emit_code_type), write_cloog_file, *call_texts, header_includes ) == EXIT_FAILURE ) {
     // TODO stop if codegeneration failed
-    return "";
+    return false;
   }
 
   auto end_codegen = std::chrono::high_resolution_clock::now();
