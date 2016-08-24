@@ -344,6 +344,11 @@ class ClanAction : public PluginASTAction {
       LOGD << "clang action " << this << " destroyed ";
     }
 
+    // Automatically run the plugin after the main AST action
+    PluginASTAction::ActionType getActionType() override {
+      return AddAfterMainAction;
+    }
+
 protected:
 
   CodeGenerationType emit_code_type = CodeGenerationType::ACC;
