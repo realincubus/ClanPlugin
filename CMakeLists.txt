@@ -80,10 +80,13 @@ add_llvm_loadable_module(
 target_link_libraries( 
   ClanPlugin 
   clangASTMatchers 
-  libclang 
+  #libclang 
   ${PLUTO_CODEGEN_CXX_LIBRARY} 
   ${PET_LIBRARY} 
   ${PET_ISL_LIBRARY} 
+  /root/pluto_install/lib/libcloog-isl.a
+  /root/pluto_install/lib/libpluto.a
+  /root/pluto_install/lib/libisl.a
   clangSema 
 )
 

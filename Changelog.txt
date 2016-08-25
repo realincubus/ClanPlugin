@@ -34,6 +34,7 @@ after holidays and a lot of other work:
 - development is now done inside the container environment 
  - load incubus/opt-development
  - was needed since clang is moving to fast
+- plugin now has a install target and fits into the other stuff 
 
 
 == Version 0.03 == 
