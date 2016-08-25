@@ -5,8 +5,36 @@
 # improve kill statement analysis
  - needs to be better for 2d 
  - needs to understand scopes otherwise a use will result in a redeclaration
+# run other IDE with the plugin ( planned to be done by marc ) 
+ - jucicpp 
+ - qtcreator 
+ - kdevelop 
+ - ...
 # reduction unparser for hpx
+ - does not seem to be easy 
 # make it possible to use iterators in c++ code
+
+== Version 0.04 == 
+
+after holidays and a lot of other work:
+- container size of the incubus/ycm container down to 1GB 
+- updated build process to build with clang 4.0 
+  - had to add new symbols to the export list 
+- mail to mailing list about the state of libclang ( and the export list ) 
+  - clang-tidy seems to have the same problems
+- plugin runs in kdevelop 
+- plugin runs in qtcreator
+- simple libclang client code 
+  - transforms warnings from plugins and compiler into linter warnings
+  - needs upload via phabricator server side linter
+- clang now allows -fplugin=plugin.so instead of -Xclang -load 
+  - this makes it easier to load plugins via YouCompleteMe since I dont
+    need to disable the Xclang filter and the plugin is automaticaly executed
+    after the main TU is done.
+- development is now done inside the container environment 
+ - load incubus/opt-development
+ - was needed since clang is moving to fast
+
 
 == Version 0.03 == 
 - due to ISC2016 just some minor changes 
