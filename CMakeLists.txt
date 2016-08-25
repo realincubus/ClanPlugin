@@ -87,7 +87,7 @@ target_link_libraries(
   clangSema 
 )
 
-install ( ClanPlugin 
+install ( TARGETS ClanPlugin 
   RUNTIME DESTINATION bin
   LIBRARY DESTINATION lib
 )
