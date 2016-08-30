@@ -81,12 +81,12 @@ target_link_libraries(
   ClanPlugin 
   clangASTMatchers 
   libclang 
+  ${PLUTO_CODEGEN_CXX_LIBRARY}
   ${PET_LIBRARY} 
   ${PET_ISL_LIBRARY} 
-  ${PLUTO_CODEGEN_CXX_LIBRARY}
-  ${CLOOG_ISL_LIBRARY}
-  ${PLUTO_STATIC_LIBRARY}
-  ${ISL_LIBRARY}
+  #${CLOOG_ISL_LIBRARY}
+  #${PLUTO_STATIC_LIBRARY}
+  #${ISL_LIBRARY}
   clangSema 
 )
 
