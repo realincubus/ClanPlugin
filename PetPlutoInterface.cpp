@@ -399,6 +399,9 @@ static pluto_codegen_cxx::EMIT_CODE_TYPE to_pluto_emit_type( CodeGenerationType 
   if ( cgt == CodeGenerationType::HPX ) {
     return pluto_codegen_cxx::EMIT_HPX;
   }
+  if ( cgt == CodeGenerationType::CUDA ) {
+    return pluto_codegen_cxx::EMIT_CUDA;
+  }
 }
 
 bool PetPlutoInterface::create_scop_replacement(  

@@ -461,6 +461,11 @@ ClanAction::ParseArgs(const CompilerInstance &CI, const std::vector<std::string>
       emit_code_type = CodeGenerationType::CILK;
     }
 
+    if ( args[i] == "-emit-cuda" ) {
+      LOGD << "emiting cuda" ;
+      emit_code_type = CodeGenerationType::CUDA;
+    }
+
     // add new back-ends here 
 
     if ( args[i] == "-write-cloog-file" ) {

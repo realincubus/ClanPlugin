@@ -19,7 +19,8 @@ enum class CodeGenerationType {
     OMP,
     TBB,
     CILK,
-    HPX
+    HPX,
+    CUDA
 };
 
 enum class DependencyAnalysisType {
