@@ -158,6 +158,7 @@ public:
 									auto name = var_decl->getNameAsString();
 									// take the source range from the operator to get the * character and the included DeclRefExpr
 									exclude_ranges.push_back( make_pair( cxx_operator_call_expr->getSourceRange(), name + "["s + "..."s + std::to_string(i) + "..."s + "]"s  ));
+									return false;
 								}
 							}
 						}	
@@ -166,7 +167,7 @@ public:
 			}
 		}	
 
-		return false;
+		return true;
 	}
 
   bool VisitDeclRefExpr( const DeclRefExpr* declRefExpr ) {
