@@ -26,14 +26,148 @@ class DeclRefVisitor
   : public clang::RecursiveASTVisitor<DeclRefVisitor> {
 public:
 
-  DeclRefVisitor( std::vector<NamedDecl*>& _iterators, SourceLocation _begin, SourceLocation _end, SourceManager& _SM ):
-    iterators(_iterators),
+  DeclRefVisitor( std::vector<NamedDecl*>& _index_refs, SourceLocation _begin, SourceLocation _end, SourceManager& _SM ):
+    index_refs(_index_refs),
     begin(_begin),
     end(_end),
     SM(_SM)
   {
 
   }
+
+	bool isRecordTypeByName( const Type* type_ptr, std::string name ) {
+		// check for beeing a record type
+		if ( !type_ptr->isRecordType() ) return false;
+
+		// get the declaration 
+		auto* record_type = type_ptr->getAs<RecordType>();
+		auto* record_decl = record_type->getDecl();
+
+		if ( record_decl->getQualifiedNameAsString() == name ) return true;
+
+		return false;
+	}
+
+	bool isRandomAccessStlType( const Type* type ) {
+		return isRecordTypeByName( type, "std::array" ) || isRecordTypeByName( type, "std::vector" ) ||
+					 isRecordTypeByName( type, "std::__cxx11::basic_string" ) || isRecordTypeByName( type, "std::basic_string" ) ||
+		 isRecordTypeByName( type, "std::deque" );
+	}
+
+	bool isIteratorType( const Type* type_ptr ) {
+		std::cerr <<  __PRETTY_FUNCTION__ << std::endl;
+		
+		type_ptr->dump();
+
+		if ( auto elaborated_type = dyn_cast_or_null<ElaboratedType>(type_ptr) ) {
+			auto nested_name_specifier = elaborated_type->getQualifier();
+
+			if ( nested_name_specifier->getKind() == NestedNameSpecifier::TypeSpec ) {
+				auto type = nested_name_specifier->getAsType();
+				if ( isRandomAccessStlType( type ) ) {
+
+					// check the named_type_qt for its name
+					auto named_type_qt = elaborated_type->getNamedType();
+					auto type = named_type_qt.getTypePtr();
+
+						if ( named_type_qt.getAsString() == "iterator" ) {
+						return true;
+					}else{
+						return false;
+					}
+				}    
+			}else{
+				return false;
+			}    
+		}else{
+			return false;
+		}
+		return true;
+	}
+
+	VarDecl* extract_container( const DeclRefExpr* decl_ref_expr_iterator ) {
+
+		const Expr* init = nullptr;
+		if ( auto var_decl = dyn_cast_or_null<VarDecl>(decl_ref_expr_iterator->getDecl()) ) {
+			init = var_decl->getInit();
+		}else{
+			return nullptr;
+		}	
+
+		cerr << "dumping init" << endl;
+		init->dump();
+		
+		// to catch containers referencd via container.begin();
+		if ( auto expression_with_cleanups = dyn_cast_or_null<ExprWithCleanups>( init ) ){
+			cerr  << " ewc  " << endl;
+			if ( auto construct = dyn_cast_or_null<CXXConstructExpr>( expression_with_cleanups->getSubExpr() ) ) {
+				cerr  << " ctor  " << endl;
+				if ( auto temporary_expression = dyn_cast_or_null<MaterializeTemporaryExpr> ( construct->getArg(0) ) ) {
+					cerr  << " te  " << endl;
+					if ( auto member_call = dyn_cast_or_null<CXXMemberCallExpr>( temporary_expression->GetTemporaryExpr() ) ) {
+						cerr << "container begin is referenced by a CXXMemberCallExpr" << endl;
+
+						if ( auto instance = member_call->getImplicitObjectArgument() ) {
+							cerr << " implicit object argument " << endl;
+							if ( auto decl_ref_expr = dyn_cast_or_null<DeclRefExpr>( instance ) ) {
+								auto type = decl_ref_expr->getType().getTypePtr();
+
+								auto fd = member_call->getDirectCallee();
+								auto name = fd->getDeclName().getAsString();
+								cerr << "function called is " << name << endl;
+
+								// TODO if the function is one of the iterator functions and the instance 
+								// called is a random access container return the containers decl
+								if ( isRandomAccessStlType( type ) && name == "begin" ){
+									cerr  << "is container and call to begin end rbegin ... " << endl;
+									if ( auto var_decl = dyn_cast_or_null<VarDecl>( decl_ref_expr->getDecl() ) ) {
+										return var_decl;
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// 
+	}
+
+	// check all operator calls for dereferences of iterators
+	bool VisitCXXOperatorCallExpr( const CXXOperatorCallExpr* cxx_operator_call_expr ) {
+
+		auto loc_start = cxx_operator_call_expr->getLocStart();
+    if ( SM.isBeforeInTranslationUnit( loc_start , begin ) ) return true;
+    if ( SM.isBeforeInTranslationUnit( end , loc_start ) ) return true;
+
+    LOGD << "visited a node CXXOperatorCallExpr node" ;
+		if ( cxx_operator_call_expr->getOperator() == OO_Star ) {
+			LOGD << "operator is OO_Star" ;
+			if ( auto arg0 = cxx_operator_call_expr->getArg(0) ) {
+				arg0->dump();
+				auto iterator = arg0->IgnoreParenImpCasts();
+				if ( isIteratorType ( iterator->getType().getTypePtr() ) ) {
+					LOGD << "found a iterator reference" ;
+					if ( auto decl_ref_expr = dyn_cast_or_null<DeclRefExpr>(iterator) ) {
+						// search this in the list of decls 
+						for( int i = 0 ; i < index_refs.size() ; i++ ) {
+							auto& index_ref = index_refs[i];
+							if ( decl_ref_expr->getDecl() == index_ref ) {
+								if ( auto var_decl = extract_container( decl_ref_expr ) ) {
+									auto name = var_decl->getNameAsString();
+									// take the source range from the operator to get the * character and the included DeclRefExpr
+									exclude_ranges.push_back( make_pair( cxx_operator_call_expr->getSourceRange(), name + "["s + "..."s + std::to_string(i) + "..."s + "]"s  ));
+								}
+							}
+						}	
+					}
+				}
+			}
+		}	
+
+		return false;
+	}
 
   bool VisitDeclRefExpr( const DeclRefExpr* declRefExpr ) {
 
@@ -42,22 +176,24 @@ public:
     if ( SM.isBeforeInTranslationUnit( end , decl_ref_loc_start ) ) return true;
 
     LOGD << "visited a node" ;
-    for( auto i = 0 ; i < iterators.size() ; i++ ){
-      auto& iterator = iterators[i];
-      if ( declRefExpr->getDecl() == iterator ) {
-	LOGD << "found a reference" ;
-	// push_this occurence to the list of excludes for this iterator
-	exclude_ranges.push_back( make_pair( declRefExpr->getSourceRange(), std::to_string(i)) );
-	return true;
+    for( auto i = 0 ; i < index_refs.size() ; i++ ){
+      auto& index_ref = index_refs[i];
+      if ( declRefExpr->getDecl() == index_ref ) {
+				LOGD << "found a reference" ;
+				// push_this occurence to the list of excludes for this index_ref
+				exclude_ranges.push_back( make_pair( declRefExpr->getSourceRange(), "..."s + std::to_string(i) + "..."s ));
+				return true;
       }
     }
+
+
     
-    // everything that is not an iterator passes this point
+    // everything that is not an index_ref passes this point
     return true;
   }
   std::vector<std::pair<SourceRange,std::string>> exclude_ranges;
 private:
-  std::vector<NamedDecl*>& iterators;
+  std::vector<NamedDecl*>& index_refs;
   SourceLocation begin;
   SourceLocation end;
   SourceManager& SM;
@@ -136,7 +272,7 @@ std::string getSourceText( SourceLocation starts_with,
     LOGD << "parsed: " << ret ;
 
     lexer_result += ret;
-    lexer_result += std::string("...") + exclude.second + std::string("...");
+    lexer_result += exclude.second;
     
     starts_with = exclude.first.getEnd();
   }
@@ -195,7 +331,7 @@ std::string ClangPetInterface::replace_with_placeholder(
 }
 
 // TODO this is not very save. replace this in the future 
-// returns the statements with some placeholders so that the iterators can be replaced with new iterator names  
+// returns the statements with some placeholders so that the index_refs can be replaced with new index_ref names  
 // all statements need to be sorted by their domain name S_0 S_1 S_2 ... 
 std::vector<std::string> ClangPetInterface::get_statement_texts( pet_scop* scop )
 {
@@ -212,7 +348,7 @@ std::vector<std::string> ClangPetInterface::get_statement_texts( pet_scop* scop 
     auto parameters = get_parameters_for_pet_stmt( stmt );
 	
     pet_loc* loc = stmt->loc;
-    // replace the iterator name in this string with a placeholder
+    // replace the index_ref name in this string with a placeholder
     auto text = replace_with_placeholder( loc, parameters );
 
     LOGD << "isl_domain: "  ;
