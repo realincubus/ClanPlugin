@@ -12,7 +12,30 @@
  - ...
 # reduction unparser for hpx
  - does not seem to be easy 
-# make it possible to use iterators in c++ code
+# make it possible to use range based for loops in c++ code
+# possible back-end
+ - thrust/cuda ( already experimented with )
+ - boost.compute
+ - std-c++17 parallel ts
+
+== Version 0.10 == 
+
+larger jump in version number due to iterator support
+
+- front-end 
+  - pet now supports iterators 
+- codegen
+  - experimental implementation for thrust/cuda
+- clanclang 
+  - now statement text analysis searches for 
+    iterators and indexes 
+- ui
+  - nvim works and displays fixits like vim
+- testing 
+  - gtest code now compiles so that 
+    the resulting code can be checked with it
+- development
+ - can now entirly be done in a development docker container
 
 == Version 0.04 == 
 
