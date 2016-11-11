@@ -2,7 +2,7 @@ CMAKE_MINIMUM_REQUIRED(VERSION 2.6)
 PROJECT(OptimizerPlugin)
 
 SET( CMAKE_BUILD_TYPE RELEASE )
-SET( CMAKE_EXPORT_COMPILATION_DATABASE on )
+SET( CMAKE_EXPORT_COMPILE_COMMANDS on )
 
 SET( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DCLANG_ENABLE_ARCMT -DCLANG_ENABLE_OBJC_REWRITER -DCLANG_ENABLE_STATIC_ANALYZER -std=c++14 -fvisibility-inlines-hidden -ffunction-sections -fdata-sections -fno-common -fno-strict-aliasing -Wl,--version-script,${CMAKE_SOURCE_DIR}/ClanPlugin.exports")
 
