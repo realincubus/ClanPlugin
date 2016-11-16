@@ -134,6 +134,7 @@ public:
 			}
 		}
 
+    return nullptr;
 		// 
 	}
 
@@ -189,12 +190,13 @@ public:
 				return true;
       }
     }
-
-
     
     // everything that is not an index_ref passes this point
     return true;
   }
+
+
+
   std::vector<std::pair<SourceRange,std::string>> exclude_ranges;
 private:
   std::vector<NamedDecl*>& index_refs;
@@ -202,6 +204,122 @@ private:
   SourceLocation end;
   SourceManager& SM;
 };
+
+class StmtFinder
+  : public clang::RecursiveASTVisitor<StmtFinder> {
+public:
+
+  StmtFinder( SourceLocation _begin, SourceLocation _end, SourceManager& _SM ):
+    begin(_begin),
+    end(_end),
+    SM(_SM)
+  {
+
+  }
+
+  bool VisitStmt( const Stmt* stmt ){
+    auto loc_start = stmt->getLocStart();
+    auto loc_end = stmt->getLocEnd();
+
+    if ( SM.isBeforeInTranslationUnit( begin, loc_start ) && SM.isBeforeInTranslationUnit( loc_end, end ) ) {
+      if ( clang_stmt == nullptr ) {
+        clang_stmt = stmt;
+        // dont recurse any further
+        return false;
+      }else{
+        LOGD << "the statement that corresponds to pets stmt locations was already set. this means pets locations are ambigous";
+        exit(-1);
+      }
+    }
+
+    return true;
+  }
+
+  const Stmt* getClangASTStmt(){
+    return clang_stmt;
+  }
+
+private:
+  const Stmt* clang_stmt = nullptr;
+  SourceLocation begin;
+  SourceLocation end;
+  SourceManager& SM;
+};
+
+class EnvironmentFinder
+  : public clang::RecursiveASTVisitor<EnvironmentFinder> {
+public:
+
+  EnvironmentFinder( const Stmt* _child ):
+    child(_child)
+  {
+
+  }
+
+  // TODO implemtent if the parent directly is the For stmt
+  bool VisitForStmt( const ForStmt* for_stmt ){
+    
+    return true;
+  }
+
+  bool VisitCompoundStmt( const CompoundStmt* compound_stmt ) {
+    LOGD << "visited a compound stmt testing children";
+    for( auto i = compound_stmt->body_begin(), e = compound_stmt->body_end() ; i != e ; i++ ) {
+      if ( *i == child ) {
+        LOGD << "found the child";
+        parent_stmt = compound_stmt;
+
+        // store predecessor and success statements if any
+        if ( i != compound_stmt->body_begin() ) {
+          predecessor = *(i-1);
+          predecessor_end = predecessor->getLocEnd();
+        }else{
+          LOGD << "dont have a predecessor taking l brace loc";
+          predecessor_end = compound_stmt->getLBracLoc();
+        }
+
+        if ( (i+1) != compound_stmt->body_end() ) {
+          successor = *(i+1);
+          successor_begin = successor->getLocStart();
+        }else{
+          LOGD << "dont have a successor taking r brace loc";
+          successor_begin = compound_stmt->getRBracLoc();
+        }
+
+
+        return false;
+      }
+    }
+    return true;
+  }
+
+  const Stmt* getParentStmt(){
+    return parent_stmt;
+  }
+
+  const Stmt* getChild() {
+    return child;
+  }
+
+  SourceLocation getPredecessorEnd(){
+    return predecessor_end;
+  }
+
+  SourceLocation getSuccessorBegin(){
+    return successor_begin;
+  }
+
+private:
+  SourceLocation predecessor_end;
+  SourceLocation successor_begin;
+
+  const Stmt* predecessor = nullptr;
+  const Stmt* successor = nullptr;
+
+  const Stmt* child = nullptr;
+  const Stmt* parent_stmt = nullptr;
+};
+
 
 int ctr = 0;
 
@@ -249,70 +367,102 @@ std::vector<NamedDecl*> get_parameters_for_pet_stmt( pet_stmt* stmt ) {
     return parameters;
 }
 
+
+// TODO analyze the text for non comment stuff like pragmas or preprocessor commands
+// handles 
+//
+// for ( ... ) {
+//   // some comment
+//   stmt;
+// }
+//
+static void includeCommentsBefore( EnvironmentFinder& env, SourceLocation& starts_with, SourceManager& SM ) {
+  LOGD << __PRETTY_FUNCTION__;   
+  auto last_loc = env.getPredecessorEnd();
+  auto line_stmt = SM.getExpansionLineNumber( starts_with ); 
+  auto line_pred = SM.getExpansionLineNumber( last_loc ); 
+
+  // in case there is something between the last statement and this statement
+  int lines_in_between = line_stmt - line_pred - 1;
+  LOGD << "lines in between starts_with " << line_stmt << " and last_loc " << line_pred << " " << lines_in_between;
+  if ( lines_in_between > 0 ) {
+    auto new_start = SM.translateLineCol( SM.getFileID( starts_with ), line_stmt - 1, 1 );
+    starts_with = new_start;
+  }
+}
+
+// handles 
+//
+// for ( ... ) {
+//   stmt; // some comment
+// }
+//
+static void includeCommentsRight( EnvironmentFinder& env, SourceLocation& ends_with, SourceManager& SM ){
+  LOGD << __PRETTY_FUNCTION__; 
+}
+
+static void includeComments( EnvironmentFinder& env, SourceLocation& starts_with, SourceLocation& ends_with, SourceManager& SM ){
+  if ( !env.getChild() ) {
+    LOGD << "no clang ast stmt can not extract comments";
+  }
+  includeCommentsBefore( env, starts_with, SM );
+  includeCommentsRight( env, ends_with, SM );
+}
+
 // pet already pareses the comment till the end of the line 
 // but it does not add the \n 
 // if the statement is not followed by a comment the new line character is already in it
-std::string getSourceText( SourceLocation starts_with, 
+std::string getSourceText( EnvironmentFinder& env, SourceLocation starts_with, 
     std::vector<std::pair<SourceRange,std::string>>& exclude_ranges, 
     SourceLocation ends_with, SourceManager& SM )  {
 
+  includeComments( env, starts_with, ends_with, SM );
+
   std::string lexer_result = "";
   std::string comment = "";
-  int skip_end = 0; 
+  int skip_end = 0;
 
-  for ( auto& exclude : exclude_ranges){
-
+  for (auto& exclude : exclude_ranges) {
     std::string ret = Lexer::getSourceText(
-      CharSourceRange::getCharRange(
-	SourceRange(
-	  Lexer::getLocForEndOfToken(starts_with,0,SM,LangOptions()), 
-	  exclude.first.getBegin()
-	)
-      ), 
-      SM,
-      LangOptions()
-    );
+        CharSourceRange::getCharRange(SourceRange(
+            Lexer::getLocForEndOfToken(starts_with, 0, SM, LangOptions()),
+            exclude.first.getBegin())),
+        SM, LangOptions());
 
-    LOGD << "parsed: " << ret ;
+    LOGD << "parsed: " << ret;
 
     lexer_result += ret;
     lexer_result += exclude.second;
-    
+
     starts_with = exclude.first.getEnd();
   }
 
   std::string ret = Lexer::getSourceText(
-    CharSourceRange::getTokenRange(
-      SourceRange(
-	Lexer::getLocForEndOfToken(starts_with,0,SM,LangOptions()), 
-	Lexer::getLocForEndOfToken(ends_with,0,SM,LangOptions()) 
-      )
-    ), 
-    SM,
-    LangOptions()
-  );
+      CharSourceRange::getTokenRange(SourceRange(
+          Lexer::getLocForEndOfToken(starts_with, 0, SM, LangOptions()),
+          Lexer::getLocForEndOfToken(ends_with, 0, SM, LangOptions()))),
+      SM, LangOptions());
 
-  LOGD << "parsed: " << ret ;
+  LOGD << "parsed: " << ret;
 
   lexer_result += ret;
 
   // to skip the closing bracket if its present
-  if ( skip_end ) {
-    lexer_result = lexer_result.substr( 0, lexer_result.size()-1);
+  if (skip_end) {
+    lexer_result = lexer_result.substr(0, lexer_result.size() - 1);
   }
-  lexer_result += comment; // the comment include the ";"
+  lexer_result += comment;  // the comment include the ";"
 
   // add a newline at the end if it does not exist
-  if ( lexer_result.size() > 0 ) {
-    if ( lexer_result.back() != '\n' ){
+  if (lexer_result.size() > 0) {
+    if (lexer_result.back() != '\n') {
       lexer_result.push_back('\n');
     }
   }
 
-  LOGD << "lexer_result: " << lexer_result ;
+  LOGD << "lexer_result: " << lexer_result;
 
   return lexer_result;
-
 }
 
 // search it by scanning this decl group for the source location // might be very slow
@@ -326,12 +476,20 @@ std::string ClangPetInterface::replace_with_placeholder(
   auto end_stmt = sloc_file.getLocWithOffset( pet_loc_get_end(loc)-1 );
   LOGD << "begin loc " << begin_stmt.printToString(SM) ;
   LOGD << "end loc " << end_stmt.printToString(SM) ;
-  
+
   // TODO i believe it should be enought to do this once
   DeclRefVisitor visitor(parameters, begin_stmt, end_stmt, SM);
   visitor.TraverseStmt( (ForStmt*)for_stmt );
 
-  return getSourceText(begin_stmt, visitor.exclude_ranges, end_stmt, SM );
+  StmtFinder stmt_finder(begin_stmt, end_stmt, SM);
+  stmt_finder.TraverseStmt( (ForStmt*)for_stmt );
+
+  auto clang_ast_stmt = stmt_finder.getClangASTStmt();
+
+  EnvironmentFinder environment_finder(clang_ast_stmt);
+  environment_finder.TraverseStmt( (ForStmt*)for_stmt );
+
+  return getSourceText(environment_finder, begin_stmt, visitor.exclude_ranges, end_stmt, SM );
 }
 
 // TODO this is not very save. replace this in the future 
@@ -388,6 +546,12 @@ pet_scop* ClangPetInterface::extract_scop(
 {
   
   DiagnosticsEngine& diag = ctx_clang.getDiagnostics();
+  
+  if ( diag.hasErrorOccurred() ) {
+    LOGD << "error has occurred";
+  }else{
+    LOGD << "no error before pet";
+  }
 
   LOGD << "handling for_stmt " << ctr++ ;
   Pet pet_scanner( diag, &ctx_clang );
@@ -403,6 +567,7 @@ pet_scop* ClangPetInterface::extract_scop(
   std::chrono::duration<double> diff = end_pet-begin_pet;
   LOGD << "pet time consumption " << diff.count() << " s" ;
 
+  LOGD << "scop is " << scop ;
   return scop;
 }
 

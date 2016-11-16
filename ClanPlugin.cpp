@@ -52,70 +52,83 @@ class Callback : public MatchFinder::MatchCallback {
     {
 
     }
-     // is the function that is called if the matcher finds something
-     virtual void run(const MatchFinder::MatchResult &Result){
-       LOGD << "plugin: callback called " ;
-       ASTContext& context = *Result.Context;
-       SourceManager& SM = context.getSourceManager();
+    // is the function that is called if the matcher finds something
+    virtual void run(const MatchFinder::MatchResult& Result) {
+      LOGD << "plugin: callback called ";
+      ASTContext& context = *Result.Context;
+      SourceManager& SM = context.getSourceManager();
+      auto& diags = context.getDiagnostics();
 
-       if ( auto function_decl = Result.Nodes.getNodeAs<FunctionDecl>("function_decl") ) {
-	 if ( auto for_stmt = Result.Nodes.getNodeAs<ForStmt>("for_stmt") ) {
-	   auto loc = for_stmt->getLocStart();
-	   if ( SM.isInMainFile( loc ) ) {
+      if (diags.hasErrorOccurred()) {
+        LOGD << "error has occurred";
+      } else {
+        LOGD << "no error pre function decl analysis";
+      }
 
-	     std::unique_ptr<std::map<std::string,std::string>> call_texts;
+      if (auto function_decl =
+              Result.Nodes.getNodeAs<FunctionDecl>("function_decl")) {
+        if (auto for_stmt = Result.Nodes.getNodeAs<ForStmt>("for_stmt")) {
+          auto loc = for_stmt->getLocStart();
+          if (SM.isInMainFile(loc)) {
+            std::unique_ptr<std::map<std::string, std::string>> call_texts;
 
-	     ClangPetInterface cp_interface(context, for_stmt);
-	     pet_scop* scop = cp_interface.extract_scop( function_decl, call_texts );
+            ClangPetInterface cp_interface(context, for_stmt);
+            pet_scop* scop =
+                cp_interface.extract_scop(function_decl, call_texts);
 
-	     if ( scop ) {
-	       LOGD << "found a valid scop" ;
-	       
-	       // TODO move to pet code
-	       // find the text of the original statement
-	       auto statement_texts = cp_interface.get_statement_texts( scop );
+            if (scop) {
+              LOGD << "found a valid scop";
 
-	       // TODO move common variables into the ctor
-	       PetPlutoInterface pp_interface(header_includes, emit_code_type, write_cloog_file);
-	       if ( pp_interface.create_scop_replacement( scop, statement_texts, call_texts ) ){
+              // TODO move to pet code
+              // find the text of the original statement
+              auto statement_texts = cp_interface.get_statement_texts(scop);
 
-		 LOGD << "emitting diagnositc" ;
-		 DiagnosticsEngine& diag = context.getDiagnostics();
-		 unsigned DiagID = diag.getCustomDiagID(DiagnosticsEngine::Warning, "found a loop to optimize - press F7 to apply");
-		 LOGD << "got id " << DiagID ;
+              // TODO move common variables into the ctor
+              PetPlutoInterface pp_interface(header_includes, emit_code_type,
+                                             write_cloog_file);
+              if (pp_interface.create_scop_replacement(scop, statement_texts,
+                                                       call_texts)) {
+                LOGD << "emitting diagnositc";
+                DiagnosticsEngine& diag = context.getDiagnostics();
+                unsigned DiagID = diag.getCustomDiagID(
+                    DiagnosticsEngine::Warning,
+                    "found a loop to optimize - press F7 to apply");
+                LOGD << "got id " << DiagID;
 
-		 auto replacement = pp_interface.getReplacement();
-		 auto begin_scop = cp_interface.getLocBeginOfScop();
+                auto replacement = pp_interface.getReplacement();
+                auto begin_scop = cp_interface.getLocBeginOfScop();
 
-		 // replace the for statement
-		 diag.Report(begin_scop, DiagID) << FixItHint::CreateReplacement(for_stmt->getSourceRange(), replacement.c_str() );
-		 LOGD << "reported error " << DiagID ;
-	       }else{
-		 // TODO this is the point to emit information about why it was not possible to 
-		 // parallelize this loop
-		 for( auto& pet_explanation : pp_interface.pet_expanations ){
+                // replace the for statement
+                diag.Report(begin_scop, DiagID) << FixItHint::CreateReplacement(
+                    for_stmt->getSourceRange(), replacement.c_str());
+                LOGD << "reported error " << DiagID;
+              } else {
+                // TODO this is the point to emit information about why it was
+                // not possible to
+                // parallelize this loop
+                for (auto& pet_explanation : pp_interface.pet_expanations) {
+                  unsigned int loc = std::get<0>(pet_explanation);
+                  auto clang_src_loc =
+                      cp_interface.getLocRelativeToFileBegin(loc);
 
-		   unsigned int loc = std::get<0>(pet_explanation);
-		   auto clang_src_loc = cp_interface.getLocRelativeToFileBegin( loc );
+                  DiagnosticsEngine& diag = context.getDiagnostics();
+                  unsigned DiagID = diag.getCustomDiagID(
+                      DiagnosticsEngine::Warning, "Dependency: %0");
+                  diag.Report(clang_src_loc, DiagID)
+                      << std::get<2>(pet_explanation);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
 
-		   DiagnosticsEngine& diag = context.getDiagnostics();
-		   unsigned DiagID = diag.getCustomDiagID(DiagnosticsEngine::Warning, "Dependency: %0" );
-		   diag.Report(clang_src_loc, DiagID) << std::get<2>(pet_explanation) ;
-		 }
-	       }
+    std::set<std::string> header_includes;
 
-	     }
-	   }
-	 }
-       }
-
-     }
-
-     std::set<std::string> header_includes;
-
-  private:
-     CodeGenerationType emit_code_type;
-     bool write_cloog_file;
+   private:
+    CodeGenerationType emit_code_type;
+    bool write_cloog_file;
 };
 
 
@@ -260,6 +273,13 @@ public:
 
 #if 1
   void HandleTranslationUnit( ASTContext& clang_ctx ) {
+
+    if (clang_ctx.getDiagnostics().hasErrorOccurred() ){
+      LOGD << "an error has occurred in the compiler (pre plugin)";
+    }else{
+      LOGD << "no error has occurred in the compiler";
+    }
+
     auto begin = std::chrono::high_resolution_clock::now();
     MatchFinder Finder;
     Callback Fixer(emit_code_type, write_cloog_file);
@@ -393,6 +413,12 @@ PPEnterCallback* setupCallbacks( CompilerInstance& CI ) {
 std::unique_ptr<ASTConsumer> 
 ClanAction::CreateASTConsumer(CompilerInstance &CI, llvm::StringRef){
 
+  auto& diags = CI.getDiagnostics();
+  if ( diags.hasErrorOccurred() ) {
+    LOGD << "an error has occurred before the compiler";
+  }else{
+    LOGD << "no error occurred adding plugin";
+  }
 
   if ( redirect_stdout_file != "" ) {
     LOGD << "redirect_stdout_file " << redirect_stdout_file;
