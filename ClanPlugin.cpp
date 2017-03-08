@@ -63,6 +63,8 @@ class Callback : public MatchFinder::MatchCallback {
 	   auto loc = for_stmt->getLocStart();
 	   if ( SM.isInMainFile( loc ) ) {
 
+	     function_decl->dumpColor();
+
 	     std::unique_ptr<std::map<std::string,std::string>> call_texts;
 
 	     ClangPetInterface cp_interface(context, for_stmt);
@@ -240,21 +242,42 @@ public:
     LOGD << "for loop consumer destroyed " << this ;
   }
 
-
   // all for loops that dont have a nested for loop
-  DeclarationMatcher makeForLoopMatcher(){
+  StatementMatcher makeForLoopMatcher(){
+    return forStmt(
+	unless(
+	  hasAncestor(
+	    forStmt()
+	  )
+	)
+      ).bind("for_stmt");
+  }
+
+  // match function declarations that are not in function templates
+  DeclarationMatcher makeFunctionMatcher(){
     return functionDecl(
 	forEachDescendant(
-	  forStmt(
-#if 1
-	    unless(
-	      hasAncestor(
-		forStmt()
-	      )
-	    )
-#endif
-	  ).bind("for_stmt")
-	)	  
+	  makeForLoopMatcher() 
+	),
+	unless(
+	  hasAncestor(
+	    functionTemplateDecl()
+	  )
+	)	
+    ).bind("function_decl");
+  }
+
+
+  // match function declarations that are in function templates and are instantiations
+  DeclarationMatcher makeInstantiatedFunctionMatcher(){
+    return functionDecl(
+	forEachDescendant(
+	  makeForLoopMatcher() 
+	),
+	hasAncestor(
+	  functionTemplateDecl()
+	),
+	isTemplateInstantiation()	
     ).bind("function_decl");
   }
 
@@ -264,7 +287,8 @@ public:
     MatchFinder Finder;
     Callback Fixer(emit_code_type, write_cloog_file);
     LOGD << "adding matcher" ;
-    Finder.addMatcher( makeForLoopMatcher(), &Fixer);
+    Finder.addMatcher( makeFunctionMatcher(), &Fixer);
+    Finder.addMatcher( makeInstantiatedFunctionMatcher(), &Fixer);
     LOGD << "running matcher" ;
     Finder.matchAST(clang_ctx);
 
