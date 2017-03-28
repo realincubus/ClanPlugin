@@ -53,7 +53,7 @@ PetPlutoInterface::PetPlutoInterface(
 }
 
 void PetPlutoInterface::build_rename_table( isl_union_set* domains, std::vector<int>& table ) {
-  
+  cerr << __PRETTY_FUNCTION__ << endl; 
   // get the highest number
   int max_id = -1;
   isl_union_set_foreach_set(domains, 
@@ -68,16 +68,17 @@ void PetPlutoInterface::build_rename_table( isl_union_set* domains, std::vector<
 	if ( id > *max_id ) {
 	  *max_id = id;
 	}
+	cerr << "id " << id << endl;
 	return (isl_stat)0;
       }, 
       &max_id
   );
   if ( max_id <= 0 ) return;
 
+  cerr << "plugin: max id " << max_id << endl;
   // for half open range usage
   max_id++;
 
-  LOGD << "plugin: max id " << max_id ;
   table.resize(max_id);
   int new_id = 0;
   std::fill( begin(table), end(table), -1 );
@@ -85,7 +86,7 @@ void PetPlutoInterface::build_rename_table( isl_union_set* domains, std::vector<
   // i cannot assume that the domains are in order so i have to search through the list
   for (int i = 0; i < max_id; ++i){
     std::pair<int,int> find_id = std::make_pair( i, -1 );
-    LOGD << "plugin: who has " << i ;
+    cerr << "plugin: who has " << i << endl;
     isl_union_set_foreach_set(domains, 
 	[]( __isl_take isl_set* set, void* user ){
 
@@ -95,10 +96,10 @@ void PetPlutoInterface::build_rename_table( isl_union_set* domains, std::vector<
 	  assert(isdigit(name[2]));
 	  int id = atoi(&name[2]);
 
-	  LOGD << "plugin: this is " << id ;
+	  cerr << "plugin: this is " << id << endl ;
 
 	  if ( find_id->first == id ) {
-	    LOGD << "plugin: found id " << id << " at pos " << find_id->first ;
+	    cerr << "plugin: found id " << id << " at pos " << find_id->first << endl;
 	    find_id->second = id;
 	    return (isl_stat)1;
 	  }
@@ -111,9 +112,9 @@ void PetPlutoInterface::build_rename_table( isl_union_set* domains, std::vector<
     }
   }
 
-  LOGD << "rename table: " ;
+  cerr << "rename table: " << endl;
   for (int i = 0; i < max_id; ++i){
-    LOGD << i << " " << table[i] ;
+    cerr << i << " " << table[i] << endl ;
   }
 
   // if there is no change simply clear the table and do nothing
@@ -220,6 +221,8 @@ static isl_stat add_info_to_id( __isl_take isl_set* set, void* user ) {
     assert(isdigit(name[2]));
     int id = atoi(&name[2]);
 
+    cerr << "id of this domain is " << id << endl;
+
     // get the entry from the statement texts
     auto statement_text = user_data->statement_texts[id];
 
@@ -262,6 +265,12 @@ isl_union_set* add_extra_infos_to_ids(
     std::unique_ptr<std::map<std::string,std::string>>& call_texts,
     std::vector<PetReductionVariableInfo>& reduction_variables_for_tuple_names    
   ) {
+
+  cerr << "dumping statement texts" << endl;
+  int ctr = 0;
+  for( auto s : statement_texts ) {
+    cerr << ctr++ << " " << s << endl;
+  } 
 
   AddInfoHelper helper( isl_union_set_empty( space ) ,
       statement_texts,

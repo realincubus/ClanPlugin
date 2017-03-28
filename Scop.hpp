@@ -37,6 +37,7 @@ public:
     isl_space* getParamSpace();
     isl_set* getContext();
     isl_union_set* getDomains();
+    isl_union_set* getNonKillDomains();
     isl_schedule* getSchedule();
     isl_schedule* getScheduleTree();
     ScopStmt* getStmtByTupleName( std::string name );

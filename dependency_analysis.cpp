@@ -607,7 +607,6 @@ void Dependences::addPrivatizationDependences() {
   isl_union_set_free(Universe);
 }
 
-
 PlutoCompatData Dependences::build_pluto_data( ) {
   PlutoCompatData pcd;
 
@@ -625,7 +624,8 @@ PlutoCompatData Dependences::build_pluto_data( ) {
   pcd.empty = isl_union_map_empty(space);
 
   LOGD << "dep ana: domains" ;
-  pcd.domains = scop.getDomains();
+  //pcd.domains = scop.getDomains();
+  pcd.domains = scop.getNonKillDomains( );
 
   pcd.raw = isl_union_map_copy(RAW);
   pcd.war = isl_union_map_copy(WAR);
@@ -641,6 +641,10 @@ PlutoCompatData Dependences::make_pluto_compatible( std::vector<int>& rename_tab
 
   LOGD << "writes before rename " << pcd.writes ;
   isl_union_map_dump(pcd.writes);
+
+  LOGD << "domains before rename" ;
+  isl_union_set_dump(pcd.domains);
+
   LOGD << "done writes before rename" ;
   if ( rename_table.size() > 0 ) {
     pcd.schedule = linearize_union_map( space, pcd.schedule, rename_table );
@@ -654,6 +658,9 @@ PlutoCompatData Dependences::make_pluto_compatible( std::vector<int>& rename_tab
   }
   LOGD << "writes after rename" ;
   isl_union_map_dump(pcd.writes);
+
+  LOGD << "domains after rename" ;
+  isl_union_set_dump(pcd.domains);
 
   return pcd;
 }

@@ -340,7 +340,7 @@ std::string ClangPetInterface::replace_with_placeholder(
 std::vector<std::string> ClangPetInterface::get_statement_texts( pet_scop* scop )
 {
 
-  std::vector<std::pair<std::string, std::string>> domain_text_list;
+  std::vector<std::pair<int, std::string>> domain_text_list;
 
   // TODO at the begin this has to be the brace of the enclosing block
   //clang::SourceLocation last_loc;
@@ -360,10 +360,17 @@ std::vector<std::string> ClangPetInterface::get_statement_texts( pet_scop* scop 
     LOGD << "got text: " << text ;
 
     const char* tname = isl_set_get_tuple_name( domain );
+    
+    assert(isdigit(tname[2]));
+    int id = atoi(&tname[2]);
 
-    domain_text_list.emplace_back( tname, text );
+    domain_text_list.emplace_back( id, text );
     
   } // loop over all statements
+
+  for( auto pair : domain_text_list ) {
+    cerr << pair.first << " " << pair.second << endl;
+  }
 
   // sort by domain name
   std::vector<std::string> statement_texts;

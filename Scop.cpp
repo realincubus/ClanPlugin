@@ -25,6 +25,37 @@ isl_union_set* Scop::getDomains() {
   return Domain;
 }
 
+isl_union_set* Scop::getNonKillDomains(){
+    int i;
+    isl_set *domain_i;
+    isl_union_set *domain;
+
+    if (!scop)
+	    return NULL;
+
+    domain = isl_union_set_empty(isl_set_get_space(scop->context));
+
+    for (i = 0; i < scop->n_stmt; ++i) {
+	struct pet_stmt *stmt = scop->stmts[i];
+
+	if (pet_stmt_is_kill( stmt ) )
+		continue;
+
+	if (stmt->n_arg > 0) 
+		isl_die(isl_union_set_get_ctx(domain),
+			isl_error_unsupported,
+			"data dependent conditions not supported",
+			return isl_union_set_free(domain));
+
+	domain_i = isl_set_copy(scop->stmts[i]->domain);
+	domain = isl_union_set_add_set(domain, domain_i);
+    }
+
+    return domain;
+}
+
+
+
 Scop::Scop (pet_scop* _s) :
   scop(_s)
 {

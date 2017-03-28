@@ -56,6 +56,13 @@ isl_set* rename_set( isl_set* set, std::vector<int>& rename_table ) {
 // TODO use the rename_set function
 // let the domain names be in accending order without gaps
 isl_union_set* linearize_union_set( isl_space* space, isl_union_set* domains, std::vector<int>& rename_table ) {
+
+  cerr << "dumping rename table" << endl;
+  int ctr = 0;
+  for( auto& i : rename_table ) {
+    cerr << ctr++ << " " << i << endl;
+  }
+
   union_set_rename_data user_data;
   // start with 0 
   isl_union_set* new_domain = isl_union_set_empty( space );
@@ -80,34 +87,34 @@ isl_union_set* linearize_union_set( isl_space* space, isl_union_set* domains, st
 	  int new_numeric_id = rename_table[numeric_id];
 
 	  if ( new_numeric_id < 0 || new_numeric_id >= rename_table.size() ) { 
-	    LOGD << "plugin: element was filtered" ;
+	    cerr << "plugin: element was filtered" << endl;
 	    return (isl_stat)0;
 	  }
 
 	  sprintf( new_name, "S_%d", new_numeric_id );
-	  LOGD << "renaming from " << name << " to " << new_name ;    
+	  cerr << "renaming from " << name << " to " << new_name << endl;    
 
 	  isl_id* id = isl_set_get_tuple_id( set );
 	  void* id_user_data = isl_id_get_user( id );
 	  if ( id_user_data ) {
 	    StatementInformation* sinfo = (StatementInformation*)id_user_data;
-	    LOGD << "text" << sinfo->statement_text ;
+	    cerr << "text" << sinfo->statement_text << endl ;
 	  }
-	  LOGD << "old user data " << id_user_data ;
+	  cerr << "old user data " << id_user_data << endl;
 
 	  isl_ctx* ctx = isl_id_get_ctx( id ) ;
 	  isl_id* new_id = isl_id_alloc( ctx, new_name, id_user_data );
 	  auto new_isl_set = isl_set_set_tuple_id( set, new_id );
 
 	  const char *set_name = isl_set_get_tuple_name(new_isl_set);
-	  LOGD << "done renaming new name is " << set_name ;    
+	  cerr << "done renaming new name is " << set_name << endl;    
 
 	  isl_union_set_add_set( user_data->new_set, new_isl_set );
 
 	  {
 	    isl_id* new_id = isl_set_get_tuple_id( new_isl_set );
 	    void* new_user_data = isl_id_get_user( new_id );
-	    LOGD << "new user data " << new_user_data ;
+	    cerr << "new user data " << new_user_data << endl;
 	  }
 	  return (isl_stat)0;    
       }, 
