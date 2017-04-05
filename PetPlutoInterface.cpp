@@ -43,37 +43,63 @@ using pluto_codegen_cxx::StatementInformation;
 PetPlutoInterface::PetPlutoInterface( 
     std::set<std::string>& _header_includes, 
     CodeGenerationType _emit_code_type, 
-    bool _write_cloog_file 
+    bool _write_cloog_file,
+    reporter_function _warning_reporter,
+    reporter_function _error_reporter
   ) : 
   header_includes(_header_includes),
   emit_code_type(_emit_code_type),
-  write_cloog_file(_write_cloog_file)
+  write_cloog_file(_write_cloog_file),
+  warning_reporter(_warning_reporter),
+  error_reporter(_error_reporter)
 {
 
 }
 
-void PetPlutoInterface::build_rename_table( isl_union_set* domains, std::vector<int>& table ) {
+bool PetPlutoInterface::build_rename_table( isl_union_set* domains, std::vector<int>& table ) {
   cerr << __PRETTY_FUNCTION__ << endl; 
   // get the highest number
   int max_id = -1;
-  isl_union_set_foreach_set(domains, 
+  cerr << "dumping domains" << endl;
+  isl_union_set_dump( domains );
+  auto stat = isl_union_set_foreach_set(domains, 
       []( __isl_take isl_set* set, void* user ){
 	LOGD << "Line " << __LINE__ << " " << __FILE__ ;
 	int* max_id = (int*) user;
 
-	/* A statement's domain (isl_set) should be named S_%d */
-	const char *name = isl_set_get_tuple_name(set);
-	assert(isdigit(name[2]));
-	int id = atoi(&name[2]);
-	if ( id > *max_id ) {
-	  *max_id = id;
+	if ( set == nullptr ) {
+	  cerr << "set is nullptr!?!? " << endl;
+	  return isl_stat_error;
 	}
-	cerr << "id " << id << endl;
-	return (isl_stat)0;
+
+	if ( isl_set_has_tuple_name(set) ) { 
+	  cerr << "getting name from set" << endl;
+	  /* A statement's domain (isl_set) should be named S_%d */
+	  const char *name = isl_set_get_tuple_name(set);
+	  cerr << "done getting name from set" << endl;
+	  if ( !isdigit(name[2])) {
+	    cerr << "tuple name is not convertable to a digit" << endl;
+	    cerr << "name is " << name << endl;
+	    exit(-1);
+	  }
+	  int id = atoi(&name[2]);
+	  cerr << "id is " << id << endl;
+	  if ( id > *max_id ) {
+	    *max_id = id;
+	  }
+	  cerr << "id " << id << endl;
+	  return isl_stat_ok;
+	}
+	return isl_stat_error;
       }, 
       &max_id
   );
-  if ( max_id <= 0 ) return;
+
+  if ( stat == isl_stat_error ) {
+    return false;
+  }
+
+  if ( max_id <= 0 ) return true;
 
   cerr << "plugin: max id " << max_id << endl;
   // for half open range usage
@@ -119,40 +145,10 @@ void PetPlutoInterface::build_rename_table( isl_union_set* domains, std::vector<
 
   // if there is no change simply clear the table and do nothing
   for (int i = 0; i < max_id; ++i){
-    if ( table[i] != i ) return ;    
+    if ( table[i] != i ) return true;    
   }
   table.clear();
-  
-}
-
-isl_union_set* PetPlutoInterface::collect_non_kill_domains(struct pet_scop *scop )
-{
-        int i;
-        isl_set *domain_i;
-        isl_union_set *domain;
-
-        if (!scop)
-                return NULL;
-
-        domain = isl_union_set_empty(isl_set_get_space(scop->context));
-
-        for (i = 0; i < scop->n_stmt; ++i) {
-                struct pet_stmt *stmt = scop->stmts[i];
-
-                if (pet_stmt_is_kill( stmt ) )
-                        continue;
-
-                if (stmt->n_arg > 0) 
-                        isl_die(isl_union_set_get_ctx(domain),
-                                isl_error_unsupported,
-                                "data dependent conditions not supported",
-                                return isl_union_set_free(domain));
-
-                domain_i = isl_set_copy(scop->stmts[i]->domain);
-                domain = isl_union_set_add_set(domain, domain_i);
-        }
-
-        return domain;
+  return true;  
 }
 
 // needed to call c++ delete and not c free
@@ -289,15 +285,19 @@ PlutoProg* PetPlutoInterface::compute_deps(
     std::unique_ptr<std::map<std::string,std::string>>& call_texts ) 
   {
 
-  LOGD << "plugin: building rename table" ;
-  isl_union_set* domains = collect_non_kill_domains( pscop );
-  std::vector<int> rename_table;
-  build_rename_table( domains, rename_table );
-  LOGD << "plugin: done building rename table" ;
-
   LOGD << "plugin: starting to calculate the dependencies" ;
   //Dependences dependences( pscop );
-  Dependences dependences( pscop );
+  Dependences dependences( pscop, warning_reporter, error_reporter );
+
+
+  LOGD << "plugin: building rename table" ;
+  isl_union_set* domains = dependences.getNonKillDomains();
+  std::vector<int> rename_table;
+  if ( !build_rename_table( domains, rename_table ) ) {
+    return nullptr;
+  }
+  LOGD << "plugin: done building rename table" ;
+
 
   auto reduction_variables_for_tuple_names = dependences.find_reduction_variables();
   LOGD << "plugin: r vars from dep ana " << reduction_variables_for_tuple_names.size() ;
@@ -440,14 +440,17 @@ bool PetPlutoInterface::create_scop_replacement(
 
   pet_scop* pscop = scop;
 
-  LOGD << "plugin: building rename table" ;
-  isl_union_set* domains = collect_non_kill_domains( pscop );
-  std::vector<int> rename_table;
-  build_rename_table( domains, rename_table );
-  LOGD << "plugin: done building rename table" ;
-
   LOGD << "plugin: starting to calculate the dependencies" ;
-  Dependences dependences( pscop );
+  Dependences dependences( pscop, warning_reporter, error_reporter );
+
+  LOGD << "plugin: building rename table" ;
+  isl_union_set* domains = dependences.getNonKillDomains();
+  std::vector<int> rename_table;
+  if ( !build_rename_table( domains, rename_table ) ) {
+    LOGD << "could not build the rename table" ;
+    return false;
+  }
+  LOGD << "plugin: done building rename table" ;
 
   auto reduction_variables_for_tuple_names = dependences.find_reduction_variables();
   LOGD << "plugin: r vars from dep ana " << reduction_variables_for_tuple_names.size() ;

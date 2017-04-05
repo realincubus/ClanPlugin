@@ -14,6 +14,7 @@
 #include <llvm/ADT/DenseMap.h>
 
 #include "Scop.hpp"
+#include "error_reporting.hpp"
 
 struct PetReductionVariableInfo {
   std::string statement;
@@ -54,14 +55,16 @@ public:
       MEMORY_BASED_ANALYSIS
     };
 
-    Dependences (pet_scop* _pscop ) :
+    Dependences (pet_scop* _pscop, reporter_function _warning_reporter, reporter_function _error_reporter ) :
       pscop( _pscop ),
-      scop( pscop ),
+      scop( pscop, _warning_reporter, _error_reporter ),
       RAW(nullptr), 
       WAR(nullptr), 
       WAW(nullptr), 
       RED(nullptr), 
-      TC_RED(nullptr)
+      TC_RED(nullptr),
+      warning_reporter(warning_reporter),
+      error_reporter(_error_reporter)
     {
       IslCtx = getContext( pscop ) ;
 
@@ -77,6 +80,7 @@ public:
     auto getWAW() { return WAW; };
     auto getRED() { return RED; };
     auto getDomains() { return scop.getDomains() ; }
+    auto getNonKillDomains() { return scop.getNonKillDomains() ; }
     
 
     std::vector<PetReductionVariableInfo> find_reduction_variables( );
@@ -108,6 +112,9 @@ public:
     Dependences::AnalyisLevel Level = AL_Statement;
     isl_ctx* IslCtx;
 
+    /// @brief functions to report errors to clang 
+    reporter_function warning_reporter;
+    reporter_function error_reporter;
 
     /// @brief The different basic kinds of dependences we calculate.
     isl_union_map *RAW = nullptr;

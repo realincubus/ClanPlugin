@@ -360,29 +360,82 @@ std::vector<std::string> ClangPetInterface::get_statement_texts( pet_scop* scop 
     LOGD << "got text: " << text ;
 
     const char* tname = isl_set_get_tuple_name( domain );
+
+    if ( tname == nullptr ) {
+#if 0
+      // TODO means a map might have come into this domain ( sometimes representing a kill statement in a 
+      //      special scope
+      auto space = isl_set_get_space(domain);
+      isl_space_dump( space );
+      //tname = isl_space_get_tuple_name( space , isl_dim_in ); 
+      //tname = isl_space_get_dim_name( space , isl_dim_in, 0 ); 
+      cerr << "is set " << isl_space_is_set( space ) << endl;
+      cerr << "has t name in " << isl_space_has_tuple_name( space, isl_dim_set ) << endl;
+      cerr << "has t id " << isl_space_has_tuple_name( space, isl_dim_set ) << endl;
+      cerr << "has t dim 0 set " << isl_space_has_dim_name( space, isl_dim_set, 0 ) << endl;
+      cerr << "has t dim 1 set " << isl_space_has_dim_name( space, isl_dim_set, 1 ) << endl;
+#if 1
+      //tname = isl_space_get_dim_name( space, isl_dim_all, 1 );
+      tname = isl_set_get_dim_name( domain, isl_dim_param, 1 );
+#endif
+#endif
+      continue;
+    }
+
+    cerr << "tuple name is " << tname << endl;
     
-    assert(isdigit(tname[2]));
+    if (!isdigit(tname[2])) {
+      cerr << "this is not a digit" << endl;
+      // TODO care about this later and do proper error handling
+      exit(-1);
+    }
     int id = atoi(&tname[2]);
 
     domain_text_list.emplace_back( id, text );
     
   } // loop over all statements
 
+  cerr << "before fill" << endl;
   for( auto pair : domain_text_list ) {
     cerr << pair.first << " " << pair.second << endl;
   }
+
 
   // sort by domain name
   std::vector<std::string> statement_texts;
 
   std::sort( begin(domain_text_list), end(domain_text_list), [](auto a , auto b){ return a.first < b.first; } );
 
+  // fill in the gaps and push to the string vector
+  int ctr = 0 ;
+  //for( int i = 0; i < domain_text_list.size(); i++ ){
+  for (int i = 0; i < scop->n_stmt; ++i){
+    if ( i < domain_text_list.size() ) {
+      auto& element = domain_text_list[i];
+      if ( element.first == ctr ) {
+	statement_texts.push_back( element.second );
+      }else{
+	statement_texts.push_back( "no text\n" );
+	i--;
+      }
+    }else{
+      statement_texts.push_back( "no text\n" );
+    }
+    ctr++;
+  }
+
+
+  cerr << "after fill" << endl;
+  ctr = 0;
+  for( auto s : statement_texts ) {
+    cerr << ctr++ << " " << s << endl;
+  }
+
+#if 0
   for( auto& element : domain_text_list ){
     statement_texts.push_back( element.second );
   }
-  
-
-
+#endif
 
   return statement_texts;
 }

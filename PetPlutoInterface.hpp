@@ -10,6 +10,8 @@
 #include "pluto_codegen_cxx.hpp"
 #include <libpluto.h>
 
+#include "error_reporting.hpp"
+
 struct isl_union_set;
 struct pet_scop;
 
@@ -33,7 +35,9 @@ public:
     PetPlutoInterface (
 	std::set<std::string>& _header_includes, 
 	CodeGenerationType _emit_code_type, 
-	bool _write_cloog_file
+	bool _write_cloog_file,
+	reporter_function warning_reporter,
+	reporter_function error_reporter
     ); 
     virtual ~PetPlutoInterface () {}
 
@@ -52,8 +56,7 @@ public:
 protected:
 
 
-  void build_rename_table( isl_union_set* domains, std::vector<int>& table );
-  isl_union_set *collect_non_kill_domains(struct pet_scop *scop );
+  bool build_rename_table( isl_union_set* domains, std::vector<int>& table );
   PlutoProg* pet_to_pluto_prog( 
       pet_scop* scop, 
       PlutoOptions* pluto_options, 
@@ -75,5 +78,8 @@ protected:
   std::string replacement;
 
   DependencyAnalysisType dependency_analysis_style = DependencyAnalysisType::PollyLike;
+
+  reporter_function warning_reporter;
+  reporter_function error_reporter;
 
 };

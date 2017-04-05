@@ -35,6 +35,9 @@
 #include "plog/Log.h"
 #include "plog/Appenders/ConsoleAppender.h"
 
+// error reporting
+#include "error_reporting.hpp"
+
 #include "PetPlutoInterface.hpp"
 #include "ClangPetInterface.hpp"
 
@@ -43,6 +46,26 @@ using namespace clang::ast_matchers;
 using namespace pluto_codegen_cxx;
 
 namespace {
+
+void report_warning(FileID fid, ASTContext& context, unsigned int offset, std::string message ) {
+   auto& SM = context.getSourceManager();
+   auto sloc_file = SM.translateLineCol(fid,1,1);
+   auto clang_src_loc = sloc_file.getLocWithOffset( offset );
+
+   DiagnosticsEngine& diag = context.getDiagnostics();
+   unsigned DiagID = diag.getCustomDiagID(DiagnosticsEngine::Warning, "%0" );
+   diag.Report(clang_src_loc, DiagID) << message ;
+}
+
+void report_error(FileID fid, ASTContext& context, unsigned int offset, std::string message) {
+   auto& SM = context.getSourceManager();
+   auto sloc_file = SM.translateLineCol(fid,1,1);
+   auto clang_src_loc = sloc_file.getLocWithOffset( offset );
+
+   DiagnosticsEngine& diag = context.getDiagnostics();
+   unsigned DiagID = diag.getCustomDiagID(DiagnosticsEngine::Error, "%0" );
+   diag.Report(clang_src_loc, DiagID) << message ;
+}
 
 class Callback : public MatchFinder::MatchCallback {
   public:
@@ -77,8 +100,17 @@ class Callback : public MatchFinder::MatchCallback {
 	       // find the text of the original statement
 	       auto statement_texts = cp_interface.get_statement_texts( scop );
 
+	       reporter_function warning_reporter = [&](unsigned int offset, std::string message){
+		  FileID fid = SM.getFileID( for_stmt->getLocStart() );
+		  report_warning(fid,context,offset,message);
+	       };
+	       reporter_function error_reporter = [&](unsigned int offset, std::string message){
+		  FileID fid = SM.getFileID( for_stmt->getLocStart() );
+		  report_error(fid,context,offset,message);
+	       };
+
 	       // TODO move common variables into the ctor
-	       PetPlutoInterface pp_interface(header_includes, emit_code_type, write_cloog_file);
+	       PetPlutoInterface pp_interface(header_includes, emit_code_type, write_cloog_file, warning_reporter, error_reporter);
 	       if ( pp_interface.create_scop_replacement( scop, statement_texts, call_texts ) ){
 
 		 LOGD << "emitting diagnositc" ;

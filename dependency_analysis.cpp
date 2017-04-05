@@ -666,57 +666,6 @@ PlutoCompatData Dependences::make_pluto_compatible( std::vector<int>& rename_tab
 }
 
 
-// since pet stores the read and write information for the memory accesses but changes the
-// iteration space to indicate that the statement can not be executed this function needs to 
-// skip these statements somehow
-__isl_give isl_union_map *
-Scop::getAccessesOfType(std::function<bool(MemoryAccess &)> Predicate) {
-  isl_union_map *Accesses = isl_union_map_empty(getParamSpace());
-
-  LOGD << "depana: " << __PRETTY_FUNCTION__ ;
-
-  for (auto& Stmt : *this) {
-    for (MemoryAccess& MA : *Stmt) {
-      if (!Predicate(MA))
-        continue;
-
-      isl_set *Domain = Stmt->getDomain();
-      LOGD << "depana: domain:" ;
-      isl_set_dump( Domain );
-      isl_map *AccessDomain = MA.getAccessRelation();
-      LOGD << "depana: accessrelation:" ;
-      isl_map_dump( AccessDomain );
-
-      if ( !AccessDomain ) 
-	continue;
-
-      AccessDomain = isl_map_intersect_domain(AccessDomain, Domain);
-      Accesses = isl_union_map_add_map(Accesses, AccessDomain);
-    }    
-  }
-  return isl_union_map_coalesce(Accesses);
-}
-
-__isl_give isl_union_map *Scop::getMustWrites() {
-  return getAccessesOfType([](MemoryAccess &MA) { return MA.isMustWrite(); });
-}
-
-__isl_give isl_union_map *Scop::getMayWrites() {
-  return getAccessesOfType([](MemoryAccess &MA) { return MA.isMayWrite(); });
-}
-
-__isl_give isl_union_map *Scop::getWrites() {
-  return getAccessesOfType([](MemoryAccess &MA) { return MA.isWrite(); });
-}
-
-__isl_give isl_union_map *Scop::getReads() {
-  return getAccessesOfType([](MemoryAccess &MA) { return MA.isRead(); });
-}
-
-__isl_give isl_union_map *Scop::getAccesses() {
-  return getAccessesOfType([](MemoryAccess &MA) { return true; });
-}
-
 
 // TODO one can improve this by not just fetching the tuple name but also the 
 // variable that it writes to. i have no idea on how to do that but for the time beeing
@@ -806,13 +755,13 @@ static isl_bool find_set_in_schedule( isl_schedule_node* node, void* user ) {
 	LOGV << "this set DOES contain this set" ;
 	fr->second = isl_schedule_node_copy(node);
 	// stop recursing
-	return (isl_bool)0;
+	return isl_bool_false;
       }
     }else{
       LOGV << "not considering this node since it has to have subnodes" ;
     }
   }
-  return (isl_bool)1; 
+  return isl_bool_true; 
 }
 
 // TODO get the position in the schedule
@@ -862,7 +811,7 @@ static isl_bool find_nodes( isl_schedule_node* node, void* user ) {
   if ( !a_found && isl_schedule_node_is_equal(node,a)  ) {
     a_found = true;
     LOGD << "a found" ;
-    return (isl_bool)1;
+    return isl_bool_true;
   }
 
   if ( a_found && isl_schedule_node_is_equal(node,b) ) {
@@ -870,7 +819,7 @@ static isl_bool find_nodes( isl_schedule_node* node, void* user ) {
     LOGD << "b found" ;
   }
 
-  return (isl_bool)1;
+  return isl_bool_true;
 }
 
 static bool is_before( isl_schedule* schedule, isl_schedule_node* a, isl_schedule_node* b ) {
@@ -901,10 +850,10 @@ static isl_bool find_kill_statement( isl_schedule_node* node, void* user ) {
     if ( isl_union_set_n_set( filter ) != 1 ) {
       LOGD << "skipping this filter node since it has to have children" ;
       // recurse
-      return (isl_bool)1;
+      return isl_bool_true;
     }
   }else{
-    return (isl_bool)1;
+    return isl_bool_true;
   }
 
   // first find the source statement
@@ -915,7 +864,7 @@ static isl_bool find_kill_statement( isl_schedule_node* node, void* user ) {
     LOGD << "found the source statement heading for the destination statement" ;
     source_found = true;
     // dont recurse -> kill stmt has to be in sequence
-    return (isl_bool)0;
+    return isl_bool_false;
   }
 
 
@@ -975,14 +924,14 @@ static isl_bool find_kill_statement( isl_schedule_node* node, void* user ) {
       if ( isl_space_is_equal( range_space, kill_space ) ) {
 	LOGV << "both ranges are identical setting is_killed true" ;
 	is_killed = true;
-	return (isl_bool)0;
+	return isl_bool_false;
       }else{
 	LOGV << "ranges are not identical";
       }
     }
   }
 
-  return (isl_bool)1;
+  return isl_bool_true;
 
 }
 

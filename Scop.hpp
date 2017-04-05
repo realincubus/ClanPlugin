@@ -6,6 +6,7 @@
 #include <memory>
 
 #include "ScopStmt.hpp"
+#include "error_reporting.hpp"
 
 //class ScopStmt;
 class MemoryAccess;
@@ -22,7 +23,7 @@ public:
 
 
 
-    Scop( pet_scop* );
+    Scop( pet_scop*, reporter_function, reporter_function );
 
     virtual ~Scop () {}
 
@@ -51,6 +52,11 @@ public:
     isl_union_map* getAccesses();
 private:
 
+    void get_sub_statements( ScopStmt* super_stmt );
+
+    /// @brief functions to report errors to clang 
+    reporter_function warning_reporter;
+    reporter_function error_reporter;
 
     pet_scop* scop;
     std::vector<std::unique_ptr<ScopStmt>> scop_stmts;

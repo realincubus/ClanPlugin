@@ -5,6 +5,7 @@
 
 #include <string>
 #include <vector>
+#include <functional>
 
 struct pet_stmt;
 struct isl_union_map;
@@ -33,8 +34,23 @@ public:
     std::string getTupleName();
 
     unsigned int getSourceLocation();
+    unsigned int getSourceLocationEnd();
+
+    std::vector<ScopStmt*> sub_statements;
+
+    enum AllowedAccessTypes{
+      RespectBranches,
+      IgnoreBranches
+    };
+
+    isl_union_map* getAccessesOfType(std::function<bool(MemoryAccess &)> Predicate, 
+	isl_union_map* Accesses,
+        isl_set* DomainParent = nullptr,	
+	AllowedAccessTypes allowed_access_type = RespectBranches );
 
 private:
+
+  isl_set* ignoreTrueOrFalseBranch( isl_set*, isl_set* );
 
   pet_stmt* stmt = nullptr;  
   isl_union_map* schedule = nullptr;
