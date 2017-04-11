@@ -208,13 +208,29 @@ struct PlutoRedcutionVariableInfo {
 // make all of this get the information from statement_map and call_map or however they are called
 static isl_stat add_info_to_id( __isl_take isl_set* set, void* user ) {
 
+  cerr << __PRETTY_FUNCTION__ << " " << __LINE__ << endl;
   auto user_data = (AddInfoHelper*) user;
+  cerr << __PRETTY_FUNCTION__ << " " << __LINE__ << endl;
+
+  if ( set == nullptr ) {
+    cerr << "no set given" << endl;
+    return isl_stat_error;
+  }else{
+    cerr << __PRETTY_FUNCTION__ << " " << __LINE__ << endl;
+    isl_set_dump( set );
+  }
 
   if ( auto tuple_id = isl_set_get_tuple_id( set ) ) {
+    cerr << __PRETTY_FUNCTION__ << " " << __LINE__ << endl;
     auto name = isl_id_get_name( tuple_id );
 
+    cerr << __PRETTY_FUNCTION__ << " " << __LINE__ << endl;
     // extract the number from the tuple id 
-    assert(isdigit(name[2]));
+    if (!isdigit(name[2])) {
+      cerr << "could not get the id name from the tuple" << endl;
+      cerr << "exiting now TODO: make this a non fatal error" << endl;
+      exit(-1);
+    }
     int id = atoi(&name[2]);
 
     cerr << "id of this domain is " << id << endl;
@@ -243,10 +259,12 @@ static isl_stat add_info_to_id( __isl_take isl_set* set, void* user ) {
 
     auto new_set = isl_set_set_tuple_id( set, new_id );
     isl_union_set_add_set( user_data->result, new_set );
-    return (isl_stat)0;
+    return isl_stat_ok;
+  }else{
+    cerr << "tuple has no id" << endl;
   }
 
-  LOGD << "plugin: this should never happen" ;
+  cerr << "plugin: this should never happen" << endl;
   exit(-1);
   // add the original if nothing changes
   isl_union_set_add_set( user_data->result, set );
@@ -267,12 +285,15 @@ isl_union_set* add_extra_infos_to_ids(
   for( auto s : statement_texts ) {
     cerr << ctr++ << " " << s << endl;
   } 
+  cerr << "done dumping statement texts" << endl;
 
   AddInfoHelper helper( isl_union_set_empty( space ) ,
       statement_texts,
       call_texts,
       reduction_variables_for_tuple_names 
   );
+
+  cerr << "starting recursion" << endl;
   isl_union_set_foreach_set( sets, &add_info_to_id, &helper );
   isl_union_set_dump( helper.result );
   return helper.result;

@@ -123,7 +123,9 @@ class Callback : public MatchFinder::MatchCallback {
 
 		 // replace the for statement
 		 diag.Report(begin_scop, DiagID) << FixItHint::CreateReplacement(for_stmt->getSourceRange(), replacement.c_str() );
-		 LOGD << "reported error " << DiagID ;
+		 auto begin_str = for_stmt->getLocStart().printToString(SM);	
+		 auto end_str = for_stmt->getLocEnd().printToString(SM);	
+		 LOGD << "reported error for range " << begin_str << " to " << end_str << " diag id " << DiagID ;
 	       }else{
 		 // TODO this is the point to emit information about why it was not possible to 
 		 // parallelize this loop

@@ -329,15 +329,11 @@ ScopStmt::getAccessesOfType(
       // TODO issue a warning that tells the user that we are doing something
       //      very crazy here
       // TODO rename all statements to the parent statement id
-      vector<int> table;
-      table.push_back( -1 ); // 0
-      table.push_back( -1 ); // 1
-      table.push_back( -1 );
-      table.push_back( -1 );
-      table.push_back( 3 ); // 4 
-      table.push_back( 3 ); // 5
 
-      auto rename = [&](isl_map* map, isl_dim_type t){
+      // we dont need a table we need to rename this to the parent id. always!
+      
+
+      auto rename = [&](isl_map* map, isl_dim_type t, int rename_to ){
 	  cerr << __FILE__ << " " << __LINE__ << endl ;
 	  const char *name = isl_map_get_tuple_name(map,t);
 	  if ( name == nullptr ) {
@@ -351,13 +347,7 @@ ScopStmt::getAccessesOfType(
 	  assert(isdigit(name[2]));
 	  int numeric_id = atoi(&name[2]);
 
-	  std::vector<int>& rename_table = (table);
-	  int new_numeric_id = rename_table[numeric_id];
-
-	  if ( new_numeric_id < 0 || new_numeric_id >= rename_table.size() ) { 
-	    cerr << "plugin: element was filtered"  << endl;
-	    return (isl_map*)nullptr;
-	  }
+	  int new_numeric_id = rename_to;
 
 	  sprintf( new_name, "S_%d", new_numeric_id );
 	  cerr << "renaming from " <<  name << " to " << new_name  << endl;    
@@ -377,10 +367,7 @@ ScopStmt::getAccessesOfType(
 	  auto new_isl_map = isl_map_set_tuple_id( map, t, new_id );
 	  
 	  isl_map_dump( map );
-#if 0
-	  auto new_isl_map = isl_map_set_tuple_name(map,t, new_name );
-	  isl_map_dump( new_isl_map );
-#endif
+
 	  const char *set_name = isl_map_get_tuple_name(new_isl_map, t );
 	  cerr << "done renaming"  << endl;    
 	  return new_isl_map;
@@ -392,7 +379,28 @@ ScopStmt::getAccessesOfType(
 	cerr << "before rename" << endl;
 	isl_map_dump( AccessDomain );
 	cerr << "after rename" << endl;
-	AccessDomain = rename( AccessDomain, isl_dim_in );
+
+	if ( !DomainParent ) {
+	  cerr << "dont have a domain parent " << endl;
+	  return nullptr;
+	}
+
+	cerr << "trying to get the tuple name from " << DomainParent << endl;
+	if ( isl_set_has_tuple_name( DomainParent ) ) {
+	  cerr << "has tuple name " << DomainParent << endl;
+	}else{
+	  cerr << "does not have a tuple name " << DomainParent << endl;
+	  // TODO dont return a nullptr. this means there was nothing found and not that there was an error
+	  //
+	  return nullptr;
+	}
+	const char *name = isl_set_get_tuple_name(DomainParent);
+	if ( name && !isdigit(name[2]) ){
+	  cerr << "parent has no normal statement name" << endl;
+	  return nullptr;
+	}
+	int numeric_id = atoi(&name[2]);
+	AccessDomain = rename( AccessDomain, isl_dim_in, numeric_id );
 	isl_map_dump( AccessDomain );
       }
 

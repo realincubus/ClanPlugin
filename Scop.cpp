@@ -51,7 +51,8 @@ isl_union_set* Scop::getNonKillDomains(){
 #if 1
 	if ( stmt->n_arg > 0 ) {
 	  warning_reporter(pet_loc_get_start(stmt->loc), "data dependent condition ignoring:");
-	  isl_set_dump( scop->stmts[i]->domain );
+	  //isl_set_dump( scop->stmts[i]->domain );
+	  //pet_stmt_
 	  continue;
 	}
 #endif
