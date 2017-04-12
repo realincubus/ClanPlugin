@@ -302,12 +302,14 @@ std::string getSourceText( SourceLocation starts_with,
   }
   lexer_result += comment; // the comment include the ";"
 
+#if 0
   // add a newline at the end if it does not exist
   if ( lexer_result.size() > 0 ) {
     if ( lexer_result.back() != '\n' ){
       lexer_result.push_back('\n');
     }
   }
+#endif
 
   LOGD << "lexer_result: " << lexer_result ;
 
@@ -334,6 +336,236 @@ std::string ClangPetInterface::replace_with_placeholder(
   return getSourceText(begin_stmt, visitor.exclude_ranges, end_stmt, SM );
 }
 
+class PetStmtVisitor
+  : public clang::RecursiveASTVisitor<PetStmtVisitor> {
+public:
+
+  PetStmtVisitor( SourceLocation _begin, SourceLocation _end, SourceManager& _SM ):
+    begin(_begin),
+    end(_end),
+    SM(_SM)
+  {
+
+  }
+
+  bool VisitStmt( const Stmt* stmt ) {
+
+    auto stmt_loc_start = stmt->getLocStart();
+    if ( SM.isBeforeInTranslationUnit( stmt_loc_start , begin ) ) return true;
+    if ( SM.isBeforeInTranslationUnit( end , stmt_loc_start ) ) return true;
+
+    found = stmt;
+    return false;
+  }
+
+  const Stmt* get_found() {
+    return found;
+  }
+
+private:
+
+  const Stmt* found = nullptr;
+  SourceLocation begin;
+  SourceLocation end;
+  SourceManager& SM;
+
+};
+
+class ParentStmtVisitor
+  : public clang::RecursiveASTVisitor<ParentStmtVisitor> {
+public:
+
+  ParentStmtVisitor( const Stmt* _child )
+  {
+    child = _child;
+  }
+
+  bool VisitCompoundStmt( const CompoundStmt* cstmt ) {
+    cstmt->dump();
+    for( auto& s : cstmt->body() ) {
+      if ( child == s ) {
+	found = cstmt;
+      }
+    }
+    return false;
+  }
+
+  const CompoundStmt* get_parent( ) {
+    return found;
+  }
+
+private:
+
+  const Stmt* child = nullptr;
+  const CompoundStmt* found = nullptr;
+
+};
+
+std::tuple<std::string,std::string,std::string> ClangPetInterface::get_comments( pet_loc* loc ){
+  // TODO find the statement and its surrounding that coresponds to this location
+  
+  auto begin_stmt = sloc_file.getLocWithOffset( pet_loc_get_start(loc) );
+  auto end_stmt = sloc_file.getLocWithOffset( pet_loc_get_end(loc)-1 );
+  PetStmtVisitor visitor( begin_stmt, end_stmt, SM);
+
+  cerr << "doing comment detection " << endl;
+  cerr << "----------------------- " << endl;
+  cerr << "----------------------- " << endl;
+  cerr << "----------------------- " << endl;
+  cerr << "----------------------- " << endl;
+
+  // first find the statement itself
+  visitor.TraverseStmt( (ForStmt*) for_stmt );
+
+  std::string upper_comment_text;
+  std::string right_comment_text;
+  std::string lower_comment_text;
+
+  if ( auto stmt = visitor.get_found() ) {
+    // second find its direct parent
+    ParentStmtVisitor parent_visitor( stmt );
+    parent_visitor.TraverseStmt( (ForStmt*)for_stmt);
+    if ( auto parent = parent_visitor.get_parent() ) {
+      // get our position in this compound statement 
+      int position = -1;
+      for( auto i = parent->body_begin(), e = parent->body_end(); i != e ; i++ ) {
+	if ( *i == stmt ) {
+	  position = std::distance( i , parent->body_begin() );
+	}
+      }
+
+      std::string previous_text;
+      std::string following_text;
+      bool starts_with_lbrace = false;
+      bool ends_with_rbrace = false;
+
+      {
+	SourceLocation begin_previous_text;
+	SourceLocation end_previous_text;
+
+	if ( position == 0 )  {
+	  // if we are the first in this compound statement 
+	  // use LBracLoc
+	  begin_previous_text = parent->getLBracLoc();
+	  starts_with_lbrace = true;
+	}else{
+	  // get the previous statement and get its end
+	  auto previous = *(parent->body_begin() + (position-1));
+	  begin_previous_text = previous->getLocEnd();
+	  // TODO correct this to be on the next line if we are not also on the same line as previous 
+	}
+	
+	end_previous_text = stmt->getLocStart();
+	previous_text = Lexer::getSourceText(
+	  CharSourceRange::getCharRange(
+	    SourceRange(
+	      Lexer::getLocForEndOfToken(begin_previous_text,0,SM,LangOptions()), 
+	      end_previous_text
+	    )
+	  ),
+	  SM,
+	  LangOptions()
+	);
+
+	cerr << "previous text " << previous_text << endl;
+      }
+
+      {
+	SourceLocation begin_following_text = stmt->getLocEnd();
+	SourceLocation end_following_text;
+
+	if ( position == parent->size()-1 ) {
+	  // if we are the last in this compound statement 
+	  // use RBracLoc
+	  end_following_text = parent->getRBracLoc();
+	  ends_with_rbrace = true;
+	}else{
+	  // get the following statement and get its end
+	  auto following = *(parent->body_begin() + (position+1));
+	  end_following_text = following->getLocEnd();
+	}
+	
+	following_text = Lexer::getSourceText(
+	  CharSourceRange::getCharRange(
+	    SourceRange(
+	      Lexer::getLocForEndOfToken(begin_following_text,0,SM,LangOptions()), 
+	      end_following_text
+	    )
+	  ),
+	  SM,
+	  LangOptions()
+	);
+
+	following_text = following_text.substr(1);
+	cerr << "following text " << following_text << endl;
+      }
+
+      // TODO decompose previous and following text into upper right and lower text
+      
+      {
+	stringstream prev_stream( previous_text );
+	std::string line;
+
+	std::vector<std::string> upper_comment;
+
+	if ( starts_with_lbrace ) {
+	  // handle the text after the '{' character
+	  getline( prev_stream, line );
+	  if ( !std::all_of(line.begin(),line.end(),::isspace) ) {
+	    upper_comment.push_back(line);
+	    cerr << "pushing " << line << endl;
+	  }else{
+	    cerr << "skipping " << line << endl;
+	  }
+	}
+	// read the remaining text
+	while( getline( prev_stream, line ) ){
+	  upper_comment.push_back(line);
+	  cerr << "pushing " << line << endl;
+	}
+
+	for( int i = 0 ; i < upper_comment.size()-1; i++ ) {
+	  auto& s = upper_comment[i];
+	  upper_comment_text += s + '\n';
+	}
+
+	cerr << "upper_comment_text " << upper_comment_text << endl;
+      }
+
+      {
+	stringstream following_stream( following_text );
+	std::string line;
+
+	std::vector<std::string> following_comment;
+
+	while( getline( following_stream, line ) ){
+	  following_comment.push_back(line);
+	  cerr << "pushing " << line << endl;
+	}
+
+
+	right_comment_text = following_comment.front();
+
+	for( int i = 1 ; i < following_comment.size()-1; i++ ) {
+	  auto& s = following_comment[i];
+	  lower_comment_text += s + '\n';
+	}
+
+	cerr << "right_comment_text " << right_comment_text << endl;
+	cerr << "lower_comment_text " << lower_comment_text << endl;
+      }
+	
+    }
+  }
+
+  cerr << "----------------------- " << endl;
+  cerr << "----------------------- " << endl;
+  cerr << "----------------------- " << endl;
+  cerr << "----------------------- " << endl;
+  cerr << "done doing comment detection " << endl;
+  return make_tuple( upper_comment_text,right_comment_text,lower_comment_text );
+}
+
 // TODO this is not very save. replace this in the future 
 // returns the statements with some placeholders so that the index_refs can be replaced with new index_ref names  
 // all statements need to be sorted by their domain name S_0 S_1 S_2 ... 
@@ -354,6 +586,18 @@ std::vector<std::string> ClangPetInterface::get_statement_texts( pet_scop* scop 
     pet_loc* loc = stmt->loc;
     // replace the index_ref name in this string with a placeholder
     auto text = replace_with_placeholder( loc, parameters );
+
+    if ( keep_comments ) {
+      auto comments = get_comments( loc );
+      auto upper_comment = std::get<0>( comments );
+      auto right_comment = std::get<1>( comments );
+      auto lower_comment = std::get<2>( comments );
+      text = upper_comment + text + right_comment + '\n' + lower_comment;
+    }else{
+      if ( text[text.size()-1] != '\n' ){
+	text += '\n';
+      }
+    }
 
     LOGD << "isl_domain: "  ;
     isl_set_dump( domain );

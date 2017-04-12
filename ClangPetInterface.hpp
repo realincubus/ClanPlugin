@@ -24,6 +24,10 @@ public:
     clang::SourceLocation getLocRelativeToFileBegin( unsigned int loc );
     std::vector<std::string> get_statement_texts( pet_scop* scop );
 
+    void set_keep_comments( bool state ) {
+      keep_comments = state;
+    }
+
 private:
 
 
@@ -32,6 +36,9 @@ private:
       std::vector<clang::NamedDecl*>& parameters
     );
 
+    std::tuple<std::string,std::string,std::string> get_comments( pet_loc* loc );
+
+    bool keep_comments = false;
     clang::ASTContext& ctx_clang;
     clang::SourceManager& SM;
     const clang::ForStmt* for_stmt;

@@ -40,7 +40,7 @@ public:
 
     enum AllowedAccessTypes{
       RespectBranches,
-      IgnoreBranches
+      IntersectParent
     };
 
     isl_union_map* getAccessesOfType(std::function<bool(MemoryAccess &)> Predicate, 

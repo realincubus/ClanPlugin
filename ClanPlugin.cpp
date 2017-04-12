@@ -69,9 +69,10 @@ void report_error(FileID fid, ASTContext& context, unsigned int offset, std::str
 
 class Callback : public MatchFinder::MatchCallback {
   public:
-    Callback ( CodeGenerationType _emit_code_type, bool _write_cloog_file ) :
+    Callback ( CodeGenerationType _emit_code_type, bool _write_cloog_file, bool _keep_comments ) :
       emit_code_type(_emit_code_type),
-      write_cloog_file(_write_cloog_file)
+      write_cloog_file(_write_cloog_file),
+      keep_comments(_keep_comments)
     {
 
     }
@@ -91,6 +92,7 @@ class Callback : public MatchFinder::MatchCallback {
 	     std::unique_ptr<std::map<std::string,std::string>> call_texts;
 
 	     ClangPetInterface cp_interface(context, for_stmt);
+	     cp_interface.set_keep_comments( keep_comments );
 	     pet_scop* scop = cp_interface.extract_scop( function_decl, call_texts );
 
 	     if ( scop ) {
@@ -152,6 +154,7 @@ class Callback : public MatchFinder::MatchCallback {
   private:
      CodeGenerationType emit_code_type;
      bool write_cloog_file;
+     bool keep_comments;
 };
 
 
@@ -264,10 +267,16 @@ class ForLoopConsumer : public ASTConsumer {
 public:
 
   
-  ForLoopConsumer( CodeGenerationType _emit_code_type, bool _write_cloog_file, PPEnterCallback* callbacks ) :
+  ForLoopConsumer( 
+      CodeGenerationType _emit_code_type, 
+      bool _write_cloog_file, 
+      PPEnterCallback* callbacks, 
+      bool _keep_comments ) 
+    :
     emit_code_type(_emit_code_type),
     write_cloog_file(_write_cloog_file),
-    enter_callback( callbacks )
+    enter_callback( callbacks ),
+    keep_comments(_keep_comments)
   { 
     LOGD << "for loop consumer created " << this ;
   }
@@ -319,7 +328,7 @@ public:
   void HandleTranslationUnit( ASTContext& clang_ctx ) {
     auto begin = std::chrono::high_resolution_clock::now();
     MatchFinder Finder;
-    Callback Fixer(emit_code_type, write_cloog_file);
+    Callback Fixer(emit_code_type, write_cloog_file, keep_comments);
     LOGD << "adding matcher" ;
     Finder.addMatcher( makeFunctionMatcher(), &Fixer);
     Finder.addMatcher( makeInstantiatedFunctionMatcher(), &Fixer);
@@ -376,6 +385,7 @@ public:
 private: 
   CodeGenerationType emit_code_type;
   bool write_cloog_file;
+  bool keep_comments;
   PPEnterCallback* enter_callback;
 
 };
@@ -411,6 +421,7 @@ protected:
 
   CodeGenerationType emit_code_type = CodeGenerationType::ACC;
   bool write_cloog_file = false;
+  bool keep_comments = false;
   std::string redirect_stdout_file = "";
   std::string redirect_stderr_file = "";
 
@@ -472,7 +483,7 @@ ClanAction::CreateASTConsumer(CompilerInstance &CI, llvm::StringRef){
   }
   LOGD << "makeing new Consumer object with compiler instance " << &CI ;
   auto enter_callback = setupCallbacks( CI );
-  auto ret =  llvm::make_unique<ForLoopConsumer>(emit_code_type, write_cloog_file, enter_callback);
+  auto ret =  llvm::make_unique<ForLoopConsumer>(emit_code_type, write_cloog_file, enter_callback, keep_comments);
   LOGD << "at load ci " << ret.get() << " instance " << &CI << " ast context " << &CI.getASTContext() << " SM " << &CI.getSourceManager() ;
   LOGD << "done with the new consumer object" ;
 
@@ -522,6 +533,11 @@ ClanAction::ParseArgs(const CompilerInstance &CI, const std::vector<std::string>
     if ( args[i] == "-emit-cuda" ) {
       LOGD << "emiting cuda" ;
       emit_code_type = CodeGenerationType::CUDA;
+    }
+
+    if ( args[i] == "-keep-comments" ) {
+      LOGD << "keep comments on" ;
+      keep_comments = true;
     }
 
     // add new back-ends here 

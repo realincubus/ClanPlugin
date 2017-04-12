@@ -277,6 +277,48 @@ int isl_map_compatible_domain(struct isl_map *map, struct isl_set *set)
                                         set_dim, isl_dim_set);
 }
 
+// TODO extract this mehtod
+
+isl_map* rename(isl_map* map, isl_dim_type t, int rename_to ){
+  cerr << __FILE__ << " " << __LINE__ << endl ;
+  const char *name = isl_map_get_tuple_name(map,t);
+  if ( name == nullptr ) {
+    cerr << "pluto compat: could not get the name for dim type " << t ;
+    return (isl_map*)nullptr;
+  }
+  cerr << "tuple name is " << name << endl;
+
+  char *new_name = (char*)malloc(sizeof(const char) * 10 );
+
+  assert(isdigit(name[2]));
+  int numeric_id = atoi(&name[2]);
+
+  int new_numeric_id = rename_to;
+
+  sprintf( new_name, "S_%d", new_numeric_id );
+  cerr << "renaming from " <<  name << " to " << new_name  << endl;    
+
+  isl_id* id = isl_map_get_tuple_id( map, t  );
+  void* id_user_data = isl_id_get_user( id );
+#if 0
+  if ( id_user_data ) {
+    StatementInformation* sinfo = (StatementInformation*)id_user_data;
+    LOGD << "text" << sinfo->statement_text ;
+  }
+  cerr << "old user data " << id_user_data ;
+#endif
+
+  isl_ctx* ctx = isl_id_get_ctx( id ) ;
+  isl_id* new_id = isl_id_alloc( ctx, new_name, id_user_data );
+  auto new_isl_map = isl_map_set_tuple_id( map, t, new_id );
+  
+  isl_map_dump( map );
+
+  const char *set_name = isl_map_get_tuple_name(new_isl_map, t );
+  cerr << "done renaming"  << endl;    
+  return new_isl_map;
+};
+
 
 __isl_give isl_union_map* 
 ScopStmt::getAccessesOfType(
@@ -287,6 +329,42 @@ ScopStmt::getAccessesOfType(
 ){
 
   cerr << __PRETTY_FUNCTION__ << endl;
+
+#if 1
+  for( auto& sub_statement : sub_statements ) {
+    auto domain = sub_statement->getDomain() ;
+    cerr << "has substatements: " << endl; 
+    isl_set_dump(domain );
+
+    // TODO under the assumption that we can not determin which 
+    // branch of a condition will be taken i need to assume both will be
+    // domains are represented like { [S_4[i] -> [1]] : i >= 0 and i <= 9 }
+    // which tells me that this will be excuted in the true branch [1] (false branch [0])
+    // this information has to be evaluated
+    
+    //Domain = ignoreTrueOrFalseBranch( Domain, isl_map_get_space(AccessDomain) );
+    
+    cerr << "recursing to substatement" << endl;
+    // if we have a parent take the parent and pass it to the getAccessType function
+    isl_set* parent = nullptr;
+    if ( DomainParent ) {
+      parent = DomainParent;
+      cerr << "this is a node in the recursion tree passing " << parent << endl;
+    }else{
+      parent = getDomain();
+      cerr << "this is the root of the recursion " << parent << endl;
+    }
+    // TODO transfer the writes and reads of the sub statements to this statement
+    if( auto sub_statement_accesses = sub_statement->getAccessesOfType( Predicate, Accesses, parent, IntersectParent ) ) {
+      Accesses = sub_statement_accesses;
+      cerr << "write accesses" << endl;
+      isl_union_map_dump( Accesses );
+    }else{
+      cerr << "error in write access detection of substatements" << endl;
+      exit(-1);
+    }
+  }
+#endif 
 
   for (MemoryAccess& MA : *this) {
       if (!Predicate(MA))
@@ -302,80 +380,11 @@ ScopStmt::getAccessesOfType(
       if ( !AccessDomain ) 
 	continue;
 
-#if 1
-      if ( !sub_statements.empty() ) {
-	cerr << "statement with domain " << endl;
-	isl_set_dump ( Domain );
-	for( auto& sub_statement : sub_statements ) {
-	  auto domain = sub_statement->getDomain() ;
-	  cerr << "has substatements: " << endl; 
-	  isl_set_dump(domain );
-
-	  // TODO under the assumption that we can not determin which 
-	  // branch of a condition will be taken i need to assume both will be
-	  // domains are represented like { [S_4[i] -> [1]] : i >= 0 and i <= 9 }
-	  // which tells me that this will be excuted in the true branch [1] (false branch [0])
-	  // this information has to be evaluated
-	  
-	  //Domain = ignoreTrueOrFalseBranch( Domain, isl_map_get_space(AccessDomain) );
-	  
-	  cerr << "recursing to substatement" << endl;
-	  // TODO transfer the writes and reads of the sub statements to this statement
-	  Accesses = sub_statement->getAccessesOfType( Predicate, Accesses, Domain, IgnoreBranches );
-	}
-      }
-#endif 
-
       // TODO issue a warning that tells the user that we are doing something
       //      very crazy here
-      // TODO rename all statements to the parent statement id
 
-      // we dont need a table we need to rename this to the parent id. always!
-      
-
-      auto rename = [&](isl_map* map, isl_dim_type t, int rename_to ){
-	  cerr << __FILE__ << " " << __LINE__ << endl ;
-	  const char *name = isl_map_get_tuple_name(map,t);
-	  if ( name == nullptr ) {
-	    cerr << "pluto compat: could not get the name for dim type " << t ;
-	    return (isl_map*)nullptr;
-	  }
-	  cerr << "tuple name is " << name << endl;
-
-	  char *new_name = (char*)malloc(sizeof(const char) * 10 );
-
-	  assert(isdigit(name[2]));
-	  int numeric_id = atoi(&name[2]);
-
-	  int new_numeric_id = rename_to;
-
-	  sprintf( new_name, "S_%d", new_numeric_id );
-	  cerr << "renaming from " <<  name << " to " << new_name  << endl;    
-
-	  isl_id* id = isl_map_get_tuple_id( map, t  );
-	  void* id_user_data = isl_id_get_user( id );
-#if 0
-	  if ( id_user_data ) {
-	    StatementInformation* sinfo = (StatementInformation*)id_user_data;
-	    LOGD << "text" << sinfo->statement_text ;
-	  }
-	  cerr << "old user data " << id_user_data ;
-#endif
-
-	  isl_ctx* ctx = isl_id_get_ctx( id ) ;
-	  isl_id* new_id = isl_id_alloc( ctx, new_name, id_user_data );
-	  auto new_isl_map = isl_map_set_tuple_id( map, t, new_id );
-	  
-	  isl_map_dump( map );
-
-	  const char *set_name = isl_map_get_tuple_name(new_isl_map, t );
-	  cerr << "done renaming"  << endl;    
-	  return new_isl_map;
-      };
-
-
-      if ( allowed_access_type == IgnoreBranches ) {
-	Domain = ignoreTrueOrFalseBranch( Domain, DomainParent );
+      if ( allowed_access_type == IntersectParent ) {
+	auto intersec_with = DomainParent ;
 	cerr << "before rename" << endl;
 	isl_map_dump( AccessDomain );
 	cerr << "after rename" << endl;
@@ -392,25 +401,35 @@ ScopStmt::getAccessesOfType(
 	  cerr << "does not have a tuple name " << DomainParent << endl;
 	  // TODO dont return a nullptr. this means there was nothing found and not that there was an error
 	  //
-	  return nullptr;
+	  return isl_union_map_coalesce(Accesses);
 	}
 	const char *name = isl_set_get_tuple_name(DomainParent);
 	if ( name && !isdigit(name[2]) ){
 	  cerr << "parent has no normal statement name" << endl;
-	  return nullptr;
+	  return isl_union_map_coalesce(Accesses);
 	}
 	int numeric_id = atoi(&name[2]);
 	AccessDomain = rename( AccessDomain, isl_dim_in, numeric_id );
 	isl_map_dump( AccessDomain );
+
+	if ( isl_map_compatible_domain( AccessDomain, intersec_with ) ) {
+	  cerr << "intersecting domain with accessdomain" << endl;
+	  AccessDomain = isl_map_intersect_domain(AccessDomain, intersec_with);
+	  isl_map_dump( AccessDomain );
+	  cerr << "done intersecting domain with accessdomain" << endl;
+	  Accesses = isl_union_map_add_map(Accesses, AccessDomain);
+	}
+      }else{
+	if ( isl_map_compatible_domain( AccessDomain, Domain ) ) {
+	  cerr << "intersecting domain with accessdomain" << endl;
+	  AccessDomain = isl_map_intersect_domain(AccessDomain, Domain);
+	  isl_map_dump( AccessDomain );
+	  cerr << "done intersecting domain with accessdomain" << endl;
+	  Accesses = isl_union_map_add_map(Accesses, AccessDomain);
+	}
       }
 
-      if ( isl_map_compatible_domain( AccessDomain, Domain ) ) {
-	cerr << "intersecting domain with accessdomain" << endl;
-	AccessDomain = isl_map_intersect_domain(AccessDomain, Domain);
-	isl_map_dump( AccessDomain );
-	cerr << "done intersecting domain with accessdomain" << endl;
-	Accesses = isl_union_map_add_map(Accesses, AccessDomain);
-      }
+
   }
 
   auto ret =  isl_union_map_coalesce(Accesses);
