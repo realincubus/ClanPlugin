@@ -71,9 +71,21 @@ public:
 
 					// check the named_type_qt for its name
 					auto named_type_qt = elaborated_type->getNamedType();
-					auto type = named_type_qt.getTypePtr();
+                                        auto split = named_type_qt.split();
+                                        auto type = split.Ty;
+                                        type->dump();
+                                        if ( auto typedef_type = dyn_cast_or_null<TypedefType>(type)){
+                                          if ( auto typedef_type_decl = typedef_type->getDecl() ){
+                                            auto qt = typedef_type_decl->getUnderlyingType();
+                                            cout << "my name is " << typedef_type_decl->getNameAsString() << endl;
+                                            if ( typedef_type_decl->getNameAsString() == "iterator" )  {
+						std::cerr << "pet: name of the typedef type hiding the iterator is iterator " << std::endl;
+						return true;
+                                            }
+                                          }
+                                        }
 
-						if ( named_type_qt.getAsString() == "iterator" ) {
+                                        if ( named_type_qt.getAsString() == "iterator" ) {
 						return true;
 					}else{
 						return false;
