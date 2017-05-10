@@ -67,114 +67,6 @@ void report_error(FileID fid, ASTContext& context, unsigned int offset, std::str
    diag.Report(clang_src_loc, DiagID) << message ;
 }
 
-class Callback : public MatchFinder::MatchCallback {
-  public:
-    Callback ( CodeGenerationType _emit_code_type, bool _write_cloog_file, bool _keep_comments ) :
-      emit_code_type(_emit_code_type),
-      write_cloog_file(_write_cloog_file),
-      keep_comments(_keep_comments)
-    {
-
-    }
-     // is the function that is called if the matcher finds something
-     virtual void run(const MatchFinder::MatchResult &Result){
-       LOGD << "plugin: callback called " ;
-       ASTContext& context = *Result.Context;
-       SourceManager& SM = context.getSourceManager();
-
-       if ( auto function_decl = Result.Nodes.getNodeAs<FunctionDecl>("function_decl") ) {
-	 if ( auto for_stmt = Result.Nodes.getNodeAs<ForStmt>("for_stmt") ) {
-	   auto loc = for_stmt->getLocStart();
-	   if ( SM.isInMainFile( loc ) ) {
-
-	     function_decl->dumpColor();
-
-	     std::unique_ptr<std::map<std::string,std::string>> call_texts;
-
-	     ClangPetInterface cp_interface(context, for_stmt);
-	     cp_interface.set_keep_comments( keep_comments );
-	     pet_scop* scop = cp_interface.extract_scop( function_decl, call_texts );
-
-	     if ( scop ) {
-	       LOGD << "found a valid scop" ;
-	       
-	       // TODO move to pet code
-	       // find the text of the original statement
-	       auto statement_texts = cp_interface.get_statement_texts( scop );
-
-	       reporter_function warning_reporter = [&](unsigned int offset, std::string message){
-		  FileID fid = SM.getFileID( for_stmt->getLocStart() );
-		  report_warning(fid,context,offset,message);
-	       };
-	       reporter_function error_reporter = [&](unsigned int offset, std::string message){
-		  FileID fid = SM.getFileID( for_stmt->getLocStart() );
-		  report_error(fid,context,offset,message);
-	       };
-
-	       // TODO move common variables into the ctor
-	       PetPlutoInterface pp_interface(header_includes, emit_code_type, write_cloog_file, warning_reporter, error_reporter);
-	       if ( pp_interface.create_scop_replacement( scop, statement_texts, call_texts ) ){
-
-		 LOGD << "emitting diagnositc" ;
-		 DiagnosticsEngine& diag = context.getDiagnostics();
-		 unsigned DiagID = diag.getCustomDiagID(DiagnosticsEngine::Warning, "found a loop to optimize - press F7 to apply");
-		 LOGD << "got id " << DiagID ;
-
-		 auto replacement = pp_interface.getReplacement();
-		 auto begin_scop = cp_interface.getLocBeginOfScop();
-
-		 // replace the for statement
-		 diag.Report(begin_scop, DiagID) << FixItHint::CreateReplacement(for_stmt->getSourceRange(), replacement.c_str() );
-		 auto begin_str = for_stmt->getLocStart().printToString(SM);	
-		 auto end_str = for_stmt->getLocEnd().printToString(SM);	
-		 LOGD << "reported error for range " << begin_str << " to " << end_str << " diag id " << DiagID ;
-	       }else{
-		 // TODO this is the point to emit information about why it was not possible to 
-		 // parallelize this loop
-		 for( auto& pet_explanation : pp_interface.pet_expanations ){
-
-		   unsigned int loc = std::get<0>(pet_explanation);
-		   auto clang_src_loc = cp_interface.getLocRelativeToFileBegin( loc );
-
-		   DiagnosticsEngine& diag = context.getDiagnostics();
-		   unsigned DiagID = diag.getCustomDiagID(DiagnosticsEngine::Warning, "Dependency: %0" );
-		   diag.Report(clang_src_loc, DiagID) << std::get<2>(pet_explanation) ;
-		 }
-	       }
-
-	     }
-	   }
-	 }
-       }
-
-     }
-
-     std::set<std::string> header_includes;
-
-  private:
-     CodeGenerationType emit_code_type;
-     bool write_cloog_file;
-     bool keep_comments;
-};
-
-
-// return everything beginnign with l to the end of the line
-static std::string getText( SourceLocation l, SourceManager& SM ) {
-
-  bool invalid;
-  const char* data = SM.getCharacterData( l, &invalid ) ;
-
-  if ( !invalid ) {
-     const char* line_end = strchr(data, '\n');
-     if ( !line_end ) 
-       return data;
-     return std::string(data, line_end - data);
-  }
-
-  return "invalid";
-}
-
-
 // used to track what the preprocessor does when it enters the separate files
 class PPEnterCallback : public clang::PPCallbacks {
 public:
@@ -224,6 +116,23 @@ public:
 
     }
 
+
+    // return everything beginnign with l to the end of the line
+    static std::string getText( SourceLocation l, SourceManager& SM ) {
+
+      bool invalid;
+      const char* data = SM.getCharacterData( l, &invalid ) ;
+
+      if ( !invalid ) {
+         const char* line_end = strchr(data, '\n');
+         if ( !line_end ) 
+           return data;
+         return std::string(data, line_end - data);
+      }
+
+      return "invalid";
+    }
+
     virtual void FileChanged( SourceLocation Loc, FileChangeReason Reason, SrcMgr::CharacteristicKind FileType, FileID PrevFID=FileID() ) {
       if ( Reason == EnterFile ) {
 	auto file_begin = Loc;
@@ -257,6 +166,183 @@ private:
 
 };
 
+
+// FIXME put this to class scope
+bool global_editor_compat = false;
+
+struct IncludesConverter {
+
+  IncludesConverter(ASTContext& _ctx, std::set<std::string> _headers, PPEnterCallback* _enter_callback ) 
+    :
+      headers(_headers),
+      ctx(_ctx),
+      enter_callback(_enter_callback)
+  {
+    
+  }
+
+  auto add_include_fixit( std::string header  ) {
+    has_insertions = true;
+    insertion_text += std::string("#include <") + header + ">\n";
+  }
+
+  auto emit_fixit_hint() {
+    // TODO skip the lines that begin with a comment 
+    //      this way its possible to skip licences that are mostly at the beginning of a file
+    // TODO perhaps search for a marker that the user can add to the file 
+    //      might be better to add the includes there if the user has to ensure a certain order of includes
+    auto& SM = ctx.getSourceManager();
+    auto fid = SM.getMainFileID();
+    // FileID line column
+    auto begin_of_file = SM.translateLineCol( fid, 1, 1 );
+
+    if ( global_editor_compat ) {
+      insertion_text += '\n';
+    }
+
+    return FixItHint::CreateInsertion(begin_of_file, insertion_text  );
+  }
+
+  bool isHeaderAlreadyIncluded( std::string header ) {
+
+    std::lock_guard<std::mutex> lock(enter_callback->getMutex());
+    LOGD << "plugin: number of already included headers " << enter_callback->getHeaderSet().size() ;
+    for( auto& included_header : enter_callback->getHeaderSet() ){
+      LOGD << "comparing: " << included_header << " with " << header  ;
+      if ( header == included_header ) {
+	LOGD << "plugin: header is already included" ;
+	return true;
+      }
+    }
+
+    return false;
+  }
+
+  std::string insertion_text;
+  bool has_insertions=false;
+
+
+  PPEnterCallback* enter_callback;
+  std::set<std::string> headers;
+  ASTContext& ctx;
+
+};
+
+template < typename T >
+T& operator << ( T& lhs, IncludesConverter rhs ) {
+  for( auto&& header : rhs.headers ){
+    if ( rhs.isHeaderAlreadyIncluded( header ) ) continue;
+    rhs.add_include_fixit( header ); 
+  }
+  if ( rhs.has_insertions ) {
+    lhs << rhs.emit_fixit_hint();
+  }
+  return lhs;
+}
+
+class Callback : public MatchFinder::MatchCallback {
+  public:
+    Callback ( CodeGenerationType _emit_code_type, bool _write_cloog_file, bool _keep_comments, PPEnterCallback* _enter_callback ) :
+      emit_code_type(_emit_code_type),
+      write_cloog_file(_write_cloog_file),
+      keep_comments(_keep_comments),
+      enter_callback(_enter_callback)
+    {
+
+    }
+
+     // is the function that is called if the matcher finds something
+     virtual void run(const MatchFinder::MatchResult &Result){
+       LOGD << "plugin: callback called " ;
+       ASTContext& context = *Result.Context;
+       SourceManager& SM = context.getSourceManager();
+
+       if ( auto function_decl = Result.Nodes.getNodeAs<FunctionDecl>("function_decl") ) {
+	 if ( auto for_stmt = Result.Nodes.getNodeAs<ForStmt>("for_stmt") ) {
+	   auto loc = for_stmt->getLocStart();
+	   if ( SM.isInMainFile( loc ) ) {
+
+	     function_decl->dumpColor();
+
+	     std::unique_ptr<std::map<std::string,std::string>> call_texts;
+
+	     ClangPetInterface cp_interface(context, for_stmt);
+	     cp_interface.set_keep_comments( keep_comments );
+	     pet_scop* scop = cp_interface.extract_scop( function_decl, call_texts );
+
+	     if ( scop ) {
+	       LOGD << "found a valid scop" ;
+	       
+	       // TODO move to pet code
+	       // find the text of the original statement
+	       auto statement_texts = cp_interface.get_statement_texts( scop );
+
+	       reporter_function warning_reporter = [&](unsigned int offset, std::string message){
+		  FileID fid = SM.getFileID( for_stmt->getLocStart() );
+		  report_warning(fid,context,offset,message);
+	       };
+	       reporter_function error_reporter = [&](unsigned int offset, std::string message){
+		  FileID fid = SM.getFileID( for_stmt->getLocStart() );
+		  report_error(fid,context,offset,message);
+	       };
+
+	       // TODO move common variables into the ctor
+	       PetPlutoInterface pp_interface(header_includes, emit_code_type, write_cloog_file, warning_reporter, error_reporter);
+	       if ( pp_interface.create_scop_replacement( scop, statement_texts, call_texts ) ){
+
+		 LOGD << "emitting diagnositc" ;
+		 DiagnosticsEngine& diag = context.getDiagnostics();
+		 unsigned DiagID = diag.getCustomDiagID(DiagnosticsEngine::Warning, "found a loop to optimize");
+		 LOGD << "got id " << DiagID ;
+
+		 auto replacement = pp_interface.getReplacement();
+		 auto begin_scop = cp_interface.getLocBeginOfScop();
+
+		 // replace the for statement
+                 //
+                 if ( header_includes.empty() ) {
+		   diag.Report(begin_scop, DiagID) << FixItHint::CreateReplacement(for_stmt->getSourceRange(), replacement.c_str() );
+                 }else{
+		   diag.Report(begin_scop, DiagID) << FixItHint::CreateReplacement(for_stmt->getSourceRange(), replacement.c_str() ) << IncludesConverter(context,header_includes, enter_callback);
+                   //for( auto&& header_include : header_includes ){
+                     //diag.Report(begin_scop, DiagID) << add_include_fixit( context, header_include );
+                   //}
+                 }
+
+
+
+		 auto begin_str = for_stmt->getLocStart().printToString(SM);	
+		 auto end_str = for_stmt->getLocEnd().printToString(SM);	
+		 LOGD << "reported error for range " << begin_str << " to " << end_str << " diag id " << DiagID ;
+	       }else{
+		 // TODO this is the point to emit information about why it was not possible to 
+		 // parallelize this loop
+		 for( auto& pet_explanation : pp_interface.pet_expanations ){
+
+		   unsigned int loc = std::get<0>(pet_explanation);
+		   auto clang_src_loc = cp_interface.getLocRelativeToFileBegin( loc );
+
+		   DiagnosticsEngine& diag = context.getDiagnostics();
+		   unsigned DiagID = diag.getCustomDiagID(DiagnosticsEngine::Warning, "Dependency: %0" );
+		   diag.Report(clang_src_loc, DiagID) << std::get<2>(pet_explanation) ;
+		 }
+	       }
+
+	     }
+	   }
+	 }
+       }
+
+     }
+
+     std::set<std::string> header_includes;
+
+  private:
+     CodeGenerationType emit_code_type;
+     bool write_cloog_file;
+     bool keep_comments;
+     PPEnterCallback* enter_callback;
+};
 
 
 
@@ -328,20 +414,21 @@ public:
   void HandleTranslationUnit( ASTContext& clang_ctx ) {
     auto begin = std::chrono::high_resolution_clock::now();
     MatchFinder Finder;
-    Callback Fixer(emit_code_type, write_cloog_file, keep_comments);
+    Callback Fixer(emit_code_type, write_cloog_file, keep_comments, enter_callback);
     LOGD << "adding matcher" ;
     Finder.addMatcher( makeFunctionMatcher(), &Fixer);
     Finder.addMatcher( makeInstantiatedFunctionMatcher(), &Fixer);
     LOGD << "running matcher" ;
     Finder.matchAST(clang_ctx);
 
-    add_missing_includes(Fixer, clang_ctx);
+    //add_missing_includes(Fixer, clang_ctx);
 
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> diff = end-begin;
     LOGD << "plugin: time consumption " << diff.count() << " s" ;
   }
 
+#if 0
   bool isHeaderAlreadyIncluded( std::string header, ASTContext& clang_ctx ) {
 
     std::lock_guard<std::mutex> lock(enter_callback->getMutex());
@@ -356,8 +443,9 @@ public:
 
     return false;
   }
+#endif
 
-
+#if 0
   void add_missing_includes(Callback& Fixer, ASTContext& clang_ctx) {
     for( auto& header : Fixer.header_includes ){
 
@@ -380,6 +468,7 @@ public:
       diag.Report(begin_of_file, id)  << FixItHint::CreateInsertion(begin_of_file, std::string("#include <") + name + ">\n" );
     }
   }
+#endif
 #endif
 
 private: 
@@ -538,6 +627,12 @@ ClanAction::ParseArgs(const CompilerInstance &CI, const std::vector<std::string>
     if ( args[i] == "-keep-comments" ) {
       LOGD << "keep comments on" ;
       keep_comments = true;
+    }
+
+    if ( args[i] == "-editor-compat" ) {
+      LOGD << "keep comments on" ;
+      global_editor_compat = true;
+      write_cloog_file = false;
     }
 
     // add new back-ends here 
