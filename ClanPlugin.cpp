@@ -379,6 +379,22 @@ public:
     LOGD << "for loop consumer destroyed " << this ;
   }
 
+    // all for loops that dont have a nested for loop
+  StatementMatcher makeRangeForLoopMatcher(){
+    return cxxForRangeStmt(
+	unless(
+          anyOf(
+            hasAncestor(
+	      forStmt()
+            ),
+            hasAncestor(
+              cxxForRangeStmt()
+            )
+	  )
+	)
+      ).bind("for_stmt");
+  }
+
   // all for loops that dont have a nested for loop
   StatementMatcher makeForLoopMatcher(){
     return forStmt(
