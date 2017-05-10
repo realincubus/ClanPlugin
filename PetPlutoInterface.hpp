@@ -53,6 +53,10 @@ public:
 
     std::vector<std::tuple<int,int,std::string>> pet_expanations;
 
+    void set_print_guards( bool val ) {
+      print_guards = val;
+    }
+
 protected:
 
 
@@ -81,5 +85,7 @@ protected:
 
   reporter_function warning_reporter;
   reporter_function error_reporter;
+
+  bool print_guards = true;
 
 };

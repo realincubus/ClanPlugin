@@ -251,6 +251,10 @@ class Callback : public MatchFinder::MatchCallback {
 
     }
 
+    void set_print_guards( bool val ) {
+      print_guards = val;
+    }
+
      // is the function that is called if the matcher finds something
      virtual void run(const MatchFinder::MatchResult &Result){
        LOGD << "plugin: callback called " ;
@@ -288,6 +292,8 @@ class Callback : public MatchFinder::MatchCallback {
 
 	       // TODO move common variables into the ctor
 	       PetPlutoInterface pp_interface(header_includes, emit_code_type, write_cloog_file, warning_reporter, error_reporter);
+               pp_interface.set_print_guards ( print_guards );
+
 	       if ( pp_interface.create_scop_replacement( scop, statement_texts, call_texts ) ){
 
 		 LOGD << "emitting diagnositc" ;
@@ -339,8 +345,10 @@ class Callback : public MatchFinder::MatchCallback {
 
   private:
      CodeGenerationType emit_code_type;
+     // TODO needs restructuring
      bool write_cloog_file;
      bool keep_comments;
+     bool print_guards = true;
      PPEnterCallback* enter_callback;
 };
 
@@ -410,11 +418,13 @@ public:
     ).bind("function_decl");
   }
 
-#if 1
   void HandleTranslationUnit( ASTContext& clang_ctx ) {
     auto begin = std::chrono::high_resolution_clock::now();
     MatchFinder Finder;
     Callback Fixer(emit_code_type, write_cloog_file, keep_comments, enter_callback);
+
+    Fixer.set_print_guards( print_guards ) ;
+
     LOGD << "adding matcher" ;
     Finder.addMatcher( makeFunctionMatcher(), &Fixer);
     Finder.addMatcher( makeInstantiatedFunctionMatcher(), &Fixer);
@@ -428,53 +438,15 @@ public:
     LOGD << "plugin: time consumption " << diff.count() << " s" ;
   }
 
-#if 0
-  bool isHeaderAlreadyIncluded( std::string header, ASTContext& clang_ctx ) {
-
-    std::lock_guard<std::mutex> lock(enter_callback->getMutex());
-    LOGD << "plugin: number of already included headers " << enter_callback->getHeaderSet().size() ;
-    for( auto& included_header : enter_callback->getHeaderSet() ){
-      LOGD << "comparing: " << included_header << " with " << header  ;
-      if ( header == included_header ) {
-	LOGD << "plugin: header is already included" ;
-	return true;
-      }
-    }
-
-    return false;
-  }
-#endif
-
-#if 0
-  void add_missing_includes(Callback& Fixer, ASTContext& clang_ctx) {
-    for( auto& header : Fixer.header_includes ){
-
-      // dont add if the header is already included
-      if ( isHeaderAlreadyIncluded( header, clang_ctx ) ) continue;
-
-      // TODO skip the lines that begin with a comment 
-      //      this way its possible to skip licences that are mostly at the beginning of a file
-      // TODO perhaps search for a marker that the user can add to the file 
-      //      might be better to add the includes there if the user has to ensure a certain order of includes
-      auto& SM = clang_ctx.getSourceManager();
-      auto fid = SM.getMainFileID();
-      auto line = 1;
-      auto col = 1;
-      auto name = header;
-      auto begin_of_file = SM.translateLineCol( fid, line, col );
-      auto& diag = clang_ctx.getDiagnostics();
-      unsigned id = diag.getCustomDiagID(DiagnosticsEngine::Warning, "missing header");
-
-      diag.Report(begin_of_file, id)  << FixItHint::CreateInsertion(begin_of_file, std::string("#include <") + name + ">\n" );
-    }
-  }
-#endif
-#endif
+  void set_print_guards( bool val ){
+    print_guards = val;
+  } 
 
 private: 
   CodeGenerationType emit_code_type;
   bool write_cloog_file;
   bool keep_comments;
+  bool print_guards;
   PPEnterCallback* enter_callback;
 
 };
@@ -511,6 +483,7 @@ protected:
   CodeGenerationType emit_code_type = CodeGenerationType::ACC;
   bool write_cloog_file = false;
   bool keep_comments = false;
+  bool print_guards = true;
   std::string redirect_stdout_file = "";
   std::string redirect_stderr_file = "";
 
@@ -573,6 +546,7 @@ ClanAction::CreateASTConsumer(CompilerInstance &CI, llvm::StringRef){
   LOGD << "makeing new Consumer object with compiler instance " << &CI ;
   auto enter_callback = setupCallbacks( CI );
   auto ret =  llvm::make_unique<ForLoopConsumer>(emit_code_type, write_cloog_file, enter_callback, keep_comments);
+  ret->set_print_guards( print_guards );
   LOGD << "at load ci " << ret.get() << " instance " << &CI << " ast context " << &CI.getASTContext() << " SM " << &CI.getSourceManager() ;
   LOGD << "done with the new consumer object" ;
 
@@ -630,9 +604,19 @@ ClanAction::ParseArgs(const CompilerInstance &CI, const std::vector<std::string>
     }
 
     if ( args[i] == "-editor-compat" ) {
-      LOGD << "keep comments on" ;
+      LOGD << "editor compat mode" ;
       global_editor_compat = true;
       write_cloog_file = false;
+    }
+
+    if ( args[i] == "-print-guards" ) {
+      LOGD << "print guards if needed" ;
+      print_guards = true;
+    }
+
+    if ( args[i] == "-dont-print-guards" ) {
+      LOGD << "dont print guards" ;
+      print_guards = false;
     }
 
     // add new back-ends here 
