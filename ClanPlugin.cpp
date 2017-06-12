@@ -68,6 +68,26 @@ void report_error(FileID fid, ASTContext& context, unsigned int offset, std::str
    diag.Report(clang_src_loc, DiagID) << message ;
 }
 
+using profile_t = std::tuple<double, std::string, int>;
+
+std::vector<profile_t> load_profile_data( std::string path )
+{
+  using namespace std;
+  ifstream in(path);
+  std::string line;
+  vector<profile_t> profile_data;
+
+  while( getline( in, line ) ) {
+    double percent;
+    std::string file;
+    int line_number;
+    stringstream sstr(line);
+    sstr >> percent >> file >> line_number;
+    profile_data.emplace_back( percent, file, line_number );
+  }
+  return profile_data;
+}
+
 // used to track what the preprocessor does when it enters the separate files
 class PPEnterCallback : public clang::PPCallbacks {
 public:
@@ -243,12 +263,15 @@ T& operator << ( T& lhs, IncludesConverter rhs ) {
 
 class Callback : public MatchFinder::MatchCallback {
   public:
-    Callback ( ClanOptions& _clan_options, PPEnterCallback* _enter_callback ) :
+    Callback ( ClanOptions& _clan_options, PPEnterCallback* _enter_callback, std::vector<profile_t>& _profile_data) :
       clan_options(_clan_options),
+      profile_data(_profile_data),
       enter_callback(_enter_callback)
     {
 
     }
+
+    using replacement_t = std::tuple<SourceLocation, SourceRange, std::string, std::set<std::string>, double>;
 
     void set_print_guards( bool val ) {
       clan_options.print_guards = val;
@@ -262,11 +285,48 @@ class Callback : public MatchFinder::MatchCallback {
 
        if ( auto function_decl = Result.Nodes.getNodeAs<FunctionDecl>("function_decl") ) {
 	 if ( auto for_stmt = Result.Nodes.getNodeAs<ForStmt>("for_stmt") ) {
+
+           // TODO extract to function
+           bool contains_profile_result = false;
+           profile_t result;
+           if ( clan_options.use_profile_data ) {
+             // check wether the source code range of this for_stmt contains
+             // a profile result
+             auto begin = for_stmt->getLocStart();	
+             auto end = for_stmt->getLocEnd();	
+
+             auto begin_str = begin.printToString(SM);	
+             auto end_str = end.printToString(SM);	
+             std::cerr << "for stmt from  " << begin_str << " to " << end_str << std::endl;
+
+             for( auto&& profile_element : profile_data ){
+               std::string file = std::get<1>(profile_element);
+               int line = std::get<2>(profile_element);
+               int col = 1;// cant be more accurate 
+               std::cout << "profile_element " << file << " " << line << " " << col << std::endl;
+               auto& FM = SM.getFileManager();
+               if ( auto file_entry = FM.getFile(file) ) {
+                auto pos = SM.translateFileLineCol(file_entry, line, col);
+                auto pos_str = pos.printToString(SM);	
+                std::cerr << "got profile result at " << pos_str << std::endl;
+                if ( SM.isBeforeInTranslationUnit(begin,pos) ) {
+                  std::cout << "begin is before pos\n";
+                  if (SM.isBeforeInTranslationUnit(pos,end) ){
+                    std::cout << "end is after pos" << std::endl;
+                    contains_profile_result = true;
+                    result = profile_element;
+                    break;
+                  }
+                }
+               }
+             }
+             
+           }
+
 	   auto loc = for_stmt->getLocStart();
 	   if ( SM.isInMainFile( loc ) ) {
 
 	     function_decl->dumpColor();
-
 	     std::unique_ptr<std::map<std::string,std::string>> call_texts;
 
 	     ClangPetInterface cp_interface(context, for_stmt);
@@ -295,32 +355,26 @@ class Callback : public MatchFinder::MatchCallback {
 
 	       if ( pp_interface.create_scop_replacement( scop, statement_texts, call_texts ) ){
 
-		 LOGD << "emitting diagnositc" ;
-		 DiagnosticsEngine& diag = context.getDiagnostics();
-		 unsigned DiagID = diag.getCustomDiagID(DiagnosticsEngine::Warning, "found a loop to optimize");
-		 LOGD << "got id " << DiagID ;
-
+                 double time_consumption = 0.0;
+                 if ( contains_profile_result ) {
+                   time_consumption = std::get<0>(result);
+                 }
+		 
 		 auto replacement = pp_interface.getReplacement();
 		 auto begin_scop = cp_interface.getLocBeginOfScop();
 
+                 replacements.emplace_back( begin_scop, for_stmt->getSourceRange(), replacement, header_includes, time_consumption );
+#if 0
 		 // replace the for statement
-                 //
                  if ( header_includes.empty() ) {
 		   diag.Report(begin_scop, DiagID) << FixItHint::CreateReplacement(for_stmt->getSourceRange(), replacement.c_str() );
                  }else{
 		   diag.Report(begin_scop, DiagID) << FixItHint::CreateReplacement(for_stmt->getSourceRange(), replacement.c_str() ) << IncludesConverter(context,header_includes, enter_callback);
-                   //for( auto&& header_include : header_includes ){
-                     //diag.Report(begin_scop, DiagID) << add_include_fixit( context, header_include );
-                   //}
                  }
+#endif
 
-
-
-		 auto begin_str = for_stmt->getLocStart().printToString(SM);	
-		 auto end_str = for_stmt->getLocEnd().printToString(SM);	
-		 LOGD << "reported error for range " << begin_str << " to " << end_str << " diag id " << DiagID ;
 	       }else{
-		 // TODO this is the point to emit information about why it was not possible to 
+		 // this is the point to emit information about why it was not possible to 
 		 // parallelize this loop
 		 for( auto& pet_explanation : pp_interface.pet_expanations ){
 
@@ -340,12 +394,58 @@ class Callback : public MatchFinder::MatchCallback {
 
      }
 
+     void emit_replacement( ASTContext& context, replacement_t& replacement ) {
+        LOGD << "emitting diagnositc" ;
+        DiagnosticsEngine& diag = context.getDiagnostics();
+	unsigned DiagID = diag.getCustomDiagID(DiagnosticsEngine::Warning, "found a loop to optimize");
+	LOGD << "got id " << DiagID ;
+
+        auto& begin_scop = std::get<0>(replacement);
+        auto& range = std::get<1>(replacement);
+        auto& text = std::get<2>(replacement);
+        auto& header_includes = std::get<3>(replacement);
+
+        if ( header_includes.empty() ) {
+          diag.Report(begin_scop, DiagID) << FixItHint::CreateReplacement(range, text.c_str() );
+        }else{
+	  diag.Report(begin_scop, DiagID) << FixItHint::CreateReplacement(range, text.c_str() ) << IncludesConverter(context,header_includes, enter_callback);
+        }
+     }
+
+     void emit_replacements(ASTContext& context){
+  
+       if ( clan_options.use_profile_data ) {
+        // sort the replacements by their time_consumption
+        std::sort( begin(replacements), end(replacements), 
+            [](auto a, auto b){ 
+              return std::get<4>(a) > std::get<4>(b);  
+            }
+        );
+
+        // for automatic optimization one 
+        // replacement at a time is enough
+        if ( clan_options.one_at_a_time ) {
+          if ( !replacements.empty() ) {
+            emit_replacement( context, replacements.front() );
+            return;
+          }
+        }
+       } 
+
+
+       for( auto& replacement : replacements ){
+        emit_replacement( context, replacement ); 
+       }
+     }
+
      std::set<std::string> header_includes;
 
   private:
      CodeGenerationType emit_code_type;
      ClanOptions& clan_options;
+     std::vector<profile_t>& profile_data;
      PPEnterCallback* enter_callback;
+     std::vector<replacement_t> replacements;
 };
 
 
@@ -428,7 +528,13 @@ public:
   void HandleTranslationUnit( ASTContext& clang_ctx ) {
     auto begin = std::chrono::high_resolution_clock::now();
     MatchFinder Finder;
-    Callback Fixer(clan_options, enter_callback);
+
+    std::vector<profile_t> profile_data;
+    if ( clan_options.use_profile_data ) {
+      profile_data = load_profile_data(clan_options.perf_data_file);
+    }
+
+    Callback Fixer(clan_options, enter_callback,profile_data);
 
     Fixer.set_print_guards( clan_options.print_guards ) ;
 
@@ -438,7 +544,7 @@ public:
     LOGD << "running matcher" ;
     Finder.matchAST(clang_ctx);
 
-    //add_missing_includes(Fixer, clang_ctx);
+    Fixer.emit_replacements( clang_ctx );
 
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> diff = end-begin;
@@ -625,10 +731,16 @@ ClanAction::ParseArgs(const CompilerInstance &CI, const std::vector<std::string>
     // code analysis control
     if ( args[i] == "-profiling-data" ) {
       next_arg = &clan_options.perf_data_file;
+      clan_options.one_at_a_time = true;
+      clan_options.use_profile_data=true;
     }
 
     if ( args[i] == "-one-at-a-time" ) {
       clan_options.one_at_a_time = true;
+    }
+
+    if ( args[i] == "-no-one-at-a-time" ) {
+      clan_options.one_at_a_time = false;
     }
 
     if ( args[i] == "-write-cloog-file" ) {
