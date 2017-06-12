@@ -40,6 +40,7 @@
 
 #include "PetPlutoInterface.hpp"
 #include "ClangPetInterface.hpp"
+#include "ClanOptions.hpp"
 
 using namespace clang;
 using namespace clang::ast_matchers;
@@ -242,17 +243,15 @@ T& operator << ( T& lhs, IncludesConverter rhs ) {
 
 class Callback : public MatchFinder::MatchCallback {
   public:
-    Callback ( CodeGenerationType _emit_code_type, bool _write_cloog_file, bool _keep_comments, PPEnterCallback* _enter_callback ) :
-      emit_code_type(_emit_code_type),
-      write_cloog_file(_write_cloog_file),
-      keep_comments(_keep_comments),
+    Callback ( ClanOptions& _clan_options, PPEnterCallback* _enter_callback ) :
+      clan_options(_clan_options),
       enter_callback(_enter_callback)
     {
 
     }
 
     void set_print_guards( bool val ) {
-      print_guards = val;
+      clan_options.print_guards = val;
     }
 
      // is the function that is called if the matcher finds something
@@ -271,7 +270,7 @@ class Callback : public MatchFinder::MatchCallback {
 	     std::unique_ptr<std::map<std::string,std::string>> call_texts;
 
 	     ClangPetInterface cp_interface(context, for_stmt);
-	     cp_interface.set_keep_comments( keep_comments );
+	     cp_interface.set_keep_comments( clan_options.keep_comments );
 	     pet_scop* scop = cp_interface.extract_scop( function_decl, call_texts );
 
 	     if ( scop ) {
@@ -291,8 +290,8 @@ class Callback : public MatchFinder::MatchCallback {
 	       };
 
 	       // TODO move common variables into the ctor
-	       PetPlutoInterface pp_interface(header_includes, emit_code_type, write_cloog_file, warning_reporter, error_reporter);
-               pp_interface.set_print_guards ( print_guards );
+	       PetPlutoInterface pp_interface(header_includes, clan_options, warning_reporter, error_reporter);
+               pp_interface.set_print_guards ( clan_options.print_guards );
 
 	       if ( pp_interface.create_scop_replacement( scop, statement_texts, call_texts ) ){
 
@@ -345,10 +344,7 @@ class Callback : public MatchFinder::MatchCallback {
 
   private:
      CodeGenerationType emit_code_type;
-     // TODO needs restructuring
-     bool write_cloog_file;
-     bool keep_comments;
-     bool print_guards = true;
+     ClanOptions& clan_options;
      PPEnterCallback* enter_callback;
 };
 
@@ -361,16 +357,11 @@ class ForLoopConsumer : public ASTConsumer {
 public:
 
   
-  ForLoopConsumer( 
-      CodeGenerationType _emit_code_type, 
-      bool _write_cloog_file, 
-      PPEnterCallback* callbacks, 
-      bool _keep_comments ) 
+  ForLoopConsumer( ClanOptions& _clan_options,
+      PPEnterCallback* callbacks ) 
     :
-    emit_code_type(_emit_code_type),
-    write_cloog_file(_write_cloog_file),
-    enter_callback( callbacks ),
-    keep_comments(_keep_comments)
+    clan_options(_clan_options),
+    enter_callback( callbacks )
   { 
     LOGD << "for loop consumer created " << this ;
   }
@@ -437,9 +428,9 @@ public:
   void HandleTranslationUnit( ASTContext& clang_ctx ) {
     auto begin = std::chrono::high_resolution_clock::now();
     MatchFinder Finder;
-    Callback Fixer(emit_code_type, write_cloog_file, keep_comments, enter_callback);
+    Callback Fixer(clan_options, enter_callback);
 
-    Fixer.set_print_guards( print_guards ) ;
+    Fixer.set_print_guards( clan_options.print_guards ) ;
 
     LOGD << "adding matcher" ;
     Finder.addMatcher( makeFunctionMatcher(), &Fixer);
@@ -455,14 +446,11 @@ public:
   }
 
   void set_print_guards( bool val ){
-    print_guards = val;
+    clan_options.print_guards = val;
   } 
 
 private: 
-  CodeGenerationType emit_code_type;
-  bool write_cloog_file;
-  bool keep_comments;
-  bool print_guards;
+  ClanOptions& clan_options;
   PPEnterCallback* enter_callback;
 
 };
@@ -495,13 +483,7 @@ class ClanAction : public PluginASTAction {
     }
 
 protected:
-
-  CodeGenerationType emit_code_type = CodeGenerationType::ACC;
-  bool write_cloog_file = false;
-  bool keep_comments = false;
-  bool print_guards = true;
-  std::string redirect_stdout_file = "";
-  std::string redirect_stderr_file = "";
+ 
 
   // NOTE: stefan this creates the consumer that is given the TU after everything is done
   std::unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance &CI, llvm::StringRef) override;
@@ -513,6 +495,7 @@ protected:
 
 };
 
+ClanOptions clan_options;
 
 
 PPEnterCallback* setupCallbacks( CompilerInstance& CI ) {
@@ -541,28 +524,29 @@ std::unique_ptr<ASTConsumer>
 ClanAction::CreateASTConsumer(CompilerInstance &CI, llvm::StringRef){
 
 
-  if ( redirect_stdout_file != "" ) {
-    LOGD << "redirect_stdout_file " << redirect_stdout_file;
+  if ( clan_options.redirect_stdout_file != "" ) {
+    LOGD << "redirect_stdout_file " << clan_options.redirect_stdout_file;
     // TODO mutex
     if ( once_std_out ) {
-      std::freopen(redirect_stdout_file.c_str(), "a", stdout);
+      std::freopen(clan_options.redirect_stdout_file.c_str(), "a", stdout);
       setvbuf ( stdout , NULL , _IOLBF , 1024 );
       once_std_out = false;
     }     
   }
-  if ( redirect_stderr_file != "" ) {
-    LOGD << "redirect_stderr_file " << redirect_stderr_file;
+  if ( clan_options.redirect_stderr_file != "" ) {
+    LOGD << "redirect_stderr_file " << clan_options.redirect_stderr_file;
     // TODO mutex
     if ( once_std_err ) {
-      std::freopen(redirect_stderr_file.c_str(), "a", stderr);
+      std::freopen(clan_options.redirect_stderr_file.c_str(), "a", stderr);
       setvbuf ( stderr , NULL , _IOLBF , 1024 );
       once_std_err = false;
     }     
   }
   LOGD << "makeing new Consumer object with compiler instance " << &CI ;
   auto enter_callback = setupCallbacks( CI );
-  auto ret =  llvm::make_unique<ForLoopConsumer>(emit_code_type, write_cloog_file, enter_callback, keep_comments);
-  ret->set_print_guards( print_guards );
+  std::cout << "emit type " << (int)clan_options.emit_code_type << std::endl;
+  auto ret =  llvm::make_unique<ForLoopConsumer>(clan_options, enter_callback);
+  ret->set_print_guards(clan_options. print_guards );
   LOGD << "at load ci " << ret.get() << " instance " << &CI << " ast context " << &CI.getASTContext() << " SM " << &CI.getSourceManager() ;
   LOGD << "done with the new consumer object" ;
 
@@ -586,71 +570,82 @@ ClanAction::ParseArgs(const CompilerInstance &CI, const std::vector<std::string>
 
     if ( args[i] == "-emit-openacc" ) {
       LOGD << "emiting openacc" ;
-      emit_code_type = CodeGenerationType::ACC;
+      clan_options.emit_code_type = CodeGenerationType::ACC;
     }
 
     if ( args[i] == "-emit-openmp" ) {
       LOGD << "emiting openmp" ;
-      emit_code_type = CodeGenerationType::OMP;
+      clan_options.emit_code_type = CodeGenerationType::OMP;
     }
 
     if ( args[i] == "-emit-hpx" ) {
       LOGD << "emiting hpx" ;
-      emit_code_type = CodeGenerationType::HPX;
+      clan_options.emit_code_type = CodeGenerationType::HPX;
     }
 
     if ( args[i] == "-emit-tbb" ) {
       LOGD << "emiting tbb" ;
-      emit_code_type = CodeGenerationType::TBB;
+      clan_options.emit_code_type = CodeGenerationType::TBB;
     }
 
     if ( args[i] == "-emit-cilk" ) {
       LOGD << "emiting cilk" ;
-      emit_code_type = CodeGenerationType::CILK;
+      clan_options.emit_code_type = CodeGenerationType::CILK;
     }
 
     if ( args[i] == "-emit-cuda" ) {
       LOGD << "emiting cuda" ;
-      emit_code_type = CodeGenerationType::CUDA;
+      clan_options.emit_code_type = CodeGenerationType::CUDA;
     }
 
+    // add new back-ends here 
+
+    // code emission control 
     if ( args[i] == "-keep-comments" ) {
       LOGD << "keep comments on" ;
-      keep_comments = true;
+      clan_options.keep_comments = true;
     }
 
     if ( args[i] == "-editor-compat" ) {
       LOGD << "editor compat mode" ;
       global_editor_compat = true;
-      write_cloog_file = false;
+      clan_options.write_cloog_file = false;
     }
 
     if ( args[i] == "-print-guards" ) {
       LOGD << "print guards if needed" ;
-      print_guards = true;
+      clan_options.print_guards = true;
     }
 
     if ( args[i] == "-dont-print-guards" ) {
       LOGD << "dont print guards" ;
-      print_guards = false;
+      clan_options.print_guards = false;
     }
 
-    // add new back-ends here 
+    // code analysis control
+    if ( args[i] == "-profiling-data" ) {
+      next_arg = &clan_options.perf_data_file;
+    }
+
+    if ( args[i] == "-one-at-a-time" ) {
+      clan_options.one_at_a_time = true;
+    }
 
     if ( args[i] == "-write-cloog-file" ) {
       LOGD << "writing cloog file" ;
-      write_cloog_file = true;
+      clan_options.write_cloog_file = true;
     }
 
     if ( args[i] == "-redirect-stdout" ) {
       LOGD << "redirecting stdout" ;
-      next_arg = &redirect_stdout_file;
+      next_arg = &clan_options.redirect_stdout_file;
     }
 
     if ( args[i] == "-redirect-stderr" ) {
       LOGD << "redirecting stderr" ;
-      next_arg = &redirect_stderr_file;
+      next_arg = &clan_options.redirect_stderr_file;
     }
+
 
   }
 

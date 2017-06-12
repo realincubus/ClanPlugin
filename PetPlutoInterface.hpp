@@ -9,21 +9,13 @@
 #include <memory>
 #include "pluto_codegen_cxx.hpp"
 #include <libpluto.h>
+#include "ClanOptions.hpp"
 
 #include "error_reporting.hpp"
 
 struct isl_union_set;
 struct pet_scop;
 
-
-enum class CodeGenerationType {
-    ACC,
-    OMP,
-    TBB,
-    CILK,
-    HPX,
-    CUDA
-};
 
 enum class DependencyAnalysisType {
     PollyLike,
@@ -34,8 +26,7 @@ class PetPlutoInterface {
 public:
     PetPlutoInterface (
 	std::set<std::string>& _header_includes, 
-	CodeGenerationType _emit_code_type, 
-	bool _write_cloog_file,
+        ClanOptions& _clan_options,
 	reporter_function warning_reporter,
 	reporter_function error_reporter
     ); 
@@ -54,7 +45,7 @@ public:
     std::vector<std::tuple<int,int,std::string>> pet_expanations;
 
     void set_print_guards( bool val ) {
-      print_guards = val;
+      clan_options.print_guards = val;
     }
 
 protected:
@@ -74,10 +65,7 @@ protected:
     std::unique_ptr<std::map<std::string,std::string>>& call_texts 
   );
 
-
   std::set<std::string>& header_includes;
-  CodeGenerationType emit_code_type;
-  bool write_cloog_file;
 
   std::string replacement;
 
@@ -86,6 +74,6 @@ protected:
   reporter_function warning_reporter;
   reporter_function error_reporter;
 
-  bool print_guards = true;
+  ClanOptions& clan_options;
 
 };

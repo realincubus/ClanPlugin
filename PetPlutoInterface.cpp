@@ -42,14 +42,12 @@ using pluto_codegen_cxx::StatementInformation;
 
 PetPlutoInterface::PetPlutoInterface( 
     std::set<std::string>& _header_includes, 
-    CodeGenerationType _emit_code_type, 
-    bool _write_cloog_file,
+    ClanOptions& _clan_options,
     reporter_function _warning_reporter,
     reporter_function _error_reporter
   ) : 
   header_includes(_header_includes),
-  emit_code_type(_emit_code_type),
-  write_cloog_file(_write_cloog_file),
+  clan_options(_clan_options),
   warning_reporter(_warning_reporter),
   error_reporter(_error_reporter)
 {
@@ -414,6 +412,7 @@ PlutoProg* PetPlutoInterface::pet_to_pluto_prog(pet_scop* scop, PlutoOptions* pl
 }
 
 static pluto_codegen_cxx::EMIT_CODE_TYPE to_pluto_emit_type( CodeGenerationType cgt ) {
+  std::cout << "form Clan emit type " << (int)cgt << " to "  << std::endl;
   if ( cgt == CodeGenerationType::ACC ) {
     return pluto_codegen_cxx::EMIT_ACC;
   }
@@ -643,7 +642,9 @@ bool PetPlutoInterface::create_scop_replacement(
   std::stringstream outfp;
   auto begin_codegen = std::chrono::high_resolution_clock::now();
 
-  if ( pluto_codegen_cxx::pluto_multicore_codegen( outfp, prog, statement_texts, to_pluto_emit_type(emit_code_type), write_cloog_file, *call_texts, header_includes, print_guards ) == EXIT_FAILURE ) {
+  if ( pluto_codegen_cxx::pluto_multicore_codegen( outfp, prog, statement_texts, 
+        to_pluto_emit_type(clan_options.emit_code_type), clan_options.write_cloog_file, 
+        *call_texts, header_includes, clan_options.print_guards ) == EXIT_FAILURE ) {
     // TODO stop if codegeneration failed
     return false;
   }
