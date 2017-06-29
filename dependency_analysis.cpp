@@ -502,6 +502,9 @@ void Dependences::calculateDependences( Scop& S ){
   RED = isl_union_map_coalesce(RED);
   TC_RED = isl_union_map_coalesce(TC_RED);
 
+  LOGD << "TC_RED" ;
+  isl_union_map_dump( TC_RED );
+
 #if 0
   DEBUG(dump());
 #endif
@@ -700,9 +703,17 @@ std::vector<PetReductionVariableInfo> Dependences::find_reduction_variables( ){
 	}
 
 	auto* s = dependences->scop.getStmtByTupleName( in_name );
+
 	if ( s ) {
+          LOGD << "depana: domain of statement"  ;
+          auto* domain = s->getDomain();
+          isl_set_dump( domain );
+          LOGD << "depana: intersect with domain"  ;
+          auto* intersect_res = isl_map_intersect_domain(map, domain);
+          isl_map_dump(intersect_res);
 	  LOGD << "depana: found the corresponding statement"  ;
 	  for( auto& MA : *s ){
+            isl_map_dump( intersect_res );
 	    if ( MA.isReductionLike() ) {
 	      auto ba = MA.getBaseAddr();
 	      const char* name = isl_id_get_name( ba );
@@ -731,6 +742,16 @@ std::vector<PetReductionVariableInfo> Dependences::find_reduction_variables( ){
 
 typedef std::pair<isl_set*, isl_schedule_node*> find_result;
 
+
+static isl_bool find_set_in_node( isl_schedule_node* node, void* user ) {
+  find_result* fr = (find_result*)user;
+  isl_set* set = fr->first;
+
+  auto type = isl_schedule_node_get_type( node );
+  std::cout << "  type " << type << std::endl;
+
+}
+
 static isl_bool find_set_in_schedule( isl_schedule_node* node, void* user ) {
 
   find_result* fr = (find_result*)user;
@@ -738,7 +759,7 @@ static isl_bool find_set_in_schedule( isl_schedule_node* node, void* user ) {
 
   auto type = isl_schedule_node_get_type( node );
   if ( type == isl_schedule_node_filter  ) {
-    //isl_schedule_node_dump( node );
+    isl_schedule_node_dump( node );
 
 
     isl_union_set* filter = isl_schedule_node_filter_get_filter( node );
@@ -760,6 +781,23 @@ static isl_bool find_set_in_schedule( isl_schedule_node* node, void* user ) {
     }else{
       LOGV << "not considering this node since it has to have subnodes" ;
     }
+  }else{
+    LOGD << " type of this schedule node is " << type ;
+    isl_schedule_node_dump( node );
+    if ( type == isl_schedule_node_band ) {
+      LOGD << "is a band";
+      auto* partial_schedule = isl_schedule_node_band_get_partial_schedule( node );
+      LOGD << "partial schedule";
+      isl_multi_union_pw_aff_dump( partial_schedule );
+      auto members = isl_schedule_node_band_n_member( node );
+      LOGD << "has n memebers = " << members;
+      auto* um = isl_schedule_node_band_get_partial_schedule_union_map( node );
+      LOGD << "UM:";
+      isl_union_map_dump( um );
+      auto* umi = isl_union_map_intersect_params(um, set);
+
+      isl_schedule_node_foreach_descendant_top_down( node, &find_set_in_node, user );
+    }
   }
   return isl_bool_true; 
 }
@@ -768,6 +806,8 @@ static isl_bool find_set_in_schedule( isl_schedule_node* node, void* user ) {
 static isl_schedule_node* getScheduleNode( isl_schedule* schedule, isl_set* set ) {
   LOGD << "searching for :" ;
   isl_set_dump( set );
+  //LOGD << "in schedule :" ;
+  //isl_schedule_dump( schedule );
   find_result f = std::make_pair( set, nullptr );
   isl_schedule_foreach_schedule_node_top_down( schedule, &find_set_in_schedule, &f );
   return f.second;
