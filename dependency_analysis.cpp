@@ -994,6 +994,187 @@ static bool is_killed(
 // the schedule, the write statements, the kill_statements, the new map ...
 typedef std::tuple< isl_schedule*, isl_union_map*, isl_union_map*, isl_union_map* > KillStatementsData;
 
+void dump( isl_union_map* um ) {
+  std::cerr << "is a isl_union_map" << std::endl;
+  isl_union_map_dump ( um );
+}
+
+void dump( isl_union_set* us ) {
+  std::cerr << "is a isl_union_set" << std::endl;
+  isl_union_set_dump ( us );
+}
+
+void dump( isl_map* map ) {
+  std::cerr << "is a isl_map" << std::endl;
+  isl_map_dump ( map );
+}
+
+void dump( isl_set* set ) {
+  std::cerr << "is a isl_set" << std::endl;
+  isl_set_dump ( set );
+}
+
+void dump( isl_space* space ) {
+  std::cerr << "is a isl_space" << std::endl;
+  isl_space_dump ( space );
+}
+
+using PlainCooridnates = std::pair<isl_map*, std::vector<int>>;
+
+PlainCooridnates extract_order ( isl_map* map ) {
+  std::cout << __PRETTY_FUNCTION__ << std::endl ;
+  auto space = isl_map_get_space( map );
+  if ( space ) {
+    dump(space);
+  } 
+
+  int n_out = isl_map_n_out( map );
+  std::cout << "n in " << isl_map_n_in( map ) << std::endl;
+  std::cout << "n out " << n_out << std::endl;
+  std::cout << "n param " << isl_map_n_param( map ) << std::endl;
+
+  std::cout << "out dim" << isl_map_dim( map, isl_dim_out) << std::endl;
+
+  for (int i = 0; i < n_out; ++i){
+    auto val = isl_map_plain_get_val_if_fixed( map, isl_dim_out, i ); 
+    auto v = isl_val_get_num_si( val );
+    auto is_nan = isl_val_is_nan( val );
+    if ( is_nan == isl_bool_false ){
+      std::cout << "v[" << i << "] " << v << std::endl;
+    }else{
+      std::cout << "v[" << i << "] " << -1  << std::endl;
+    }
+  }
+
+
+  PlainCooridnates ret;
+
+  auto& coordinates = ret.second;
+
+  coordinates.resize(n_out);
+
+  for (int i = 0; i < n_out; ++i){
+    auto val = isl_map_plain_get_val_if_fixed( map, isl_dim_out, i ); 
+    auto v = isl_val_get_num_si( val );
+    auto is_nan = isl_val_is_nan( val );
+    if ( is_nan == isl_bool_false ){
+      coordinates[i] = v;
+    }else{
+      coordinates[i] = -1;
+    }
+  }
+
+  auto& this_map = ret.first;
+
+  this_map = map;
+
+  std::cout << "returning from " << __PRETTY_FUNCTION__ << std::endl;
+  return ret;
+}
+
+static isl_stat considerKillStatementsForMapNew( isl_map* map, void* user ) {
+
+  auto kill_statements_data = (KillStatementsData*)user;
+  isl_schedule* schedule = std::get<0>(*kill_statements_data);
+  isl_union_map* writes = std::get<1>(*kill_statements_data);
+  isl_union_map* kill_statements = std::get<2>(*kill_statements_data);
+  isl_union_map* new_map = std::get<3>(*kill_statements_data);
+
+
+  auto um_schedule = isl_schedule_get_map( schedule );
+  LOGD << "schedule as map :";
+  dump ( um_schedule );
+
+  std::vector<PlainCooridnates> plain_coordinates;
+  auto pair = std::make_pair((isl_set*)nullptr,&plain_coordinates);
+
+  // TODO remove the pair it is not needed
+  std::cout << "individual maps" << std::endl;
+  isl_union_map_foreach_map( um_schedule, [](isl_map* map, void* user){ 
+    if ( map ) {
+      dump( map );
+    }
+    auto pair = (std::pair<isl_set*,std::vector<PlainCooridnates>*>*)user;
+    PlainCooridnates pc = extract_order( map );
+    pair->second->push_back( pc );
+    return isl_stat_ok;
+  }, &pair);
+
+  int ctr = 0;
+  for( auto& plain_coordinate : plain_coordinates ){
+    std::cout << "got plain_coordinate " << ctr++ <<  std::endl;
+  }
+  
+  if ( plain_coordinates.empty() ) return isl_stat_ok;
+
+  // sanity check. all have to have the same dimensionality
+  
+  auto first_dims = plain_coordinates.front().second.size();
+
+  ctr = 0;
+  for( auto& plain_coordinate : plain_coordinates ){
+    if ( first_dims != plain_coordinate.second.size() ) {
+      std::cout << "dimensions differ in element " << ctr << std::endl;
+    }
+  }
+
+  std::sort( begin(plain_coordinates), end(plain_coordinates), [&](PlainCooridnates& a, PlainCooridnates& b){ 
+    //return recursive_greater(a.second,b.second, 0);
+    return a.second < b.second;
+  });
+
+  std::cout << "sorted by coordinates" << std::endl;
+  ctr = 0;
+  for( auto& plain_coordinate : plain_coordinates ){
+    dump( plain_coordinate.first );
+    for( auto&& element : plain_coordinate.second ){
+      std::cout << element << " ";
+    }
+    std::cout << std::endl;
+  }
+
+  // TODO find statement source and try to walk to statement destination
+  
+  auto find_statement_by_name = [&](const char* search_name){ 
+    for( int i = 0 ; i < plain_coordinates.size() ; i++ ){
+      auto statement = plain_coordinates[i].first;
+      // TODO is source statement ?
+      auto name = isl_map_get_tuple_name(statement, isl_dim_in );
+      std::cout << "name " << name << std::endl;
+      if ( strcmp( search_name, name ) == 0 ) {
+        std::cout << "found source statement" << std::endl;
+      }
+    }
+    return -1;
+  };
+
+
+  auto source = get_source_from_map( isl_map_copy(map) );
+  auto destination = get_destination_from_map( isl_map_copy(map) );
+
+  auto source_name = isl_set_get_tuple_name( source );
+  std::cout << "source name " << source_name << std::endl;
+  int begin = find_statement_by_name( source_name );
+
+
+  auto destination_name = isl_set_get_tuple_name( destination );
+  std::cout << "destination name " << destination_name << std::endl;
+  int end = find_statement_by_name( source_name );
+
+  // TODO get the variable that is killed best is to do this from source or destionation
+    
+
+  // TODO for all kill statements find their indexes
+ 
+  auto is_killed = [](int begin, int end){ 
+    
+  };
+  
+
+  return isl_stat_ok;
+}
+
+
 static isl_stat considerKillStatementsForMap( isl_map* map, void* user ) {
 
   auto kill_statements_data = (KillStatementsData*)user;
@@ -1081,6 +1262,7 @@ isl_union_map* Dependences::considerKillStatements( isl_union_map* DEPS,
   KillStatementsData ksd = std::make_tuple( schedule, writes, kill_statements, new_deps );
   // iterate over all dependencies
   isl_union_map_foreach_map( DEPS , &considerKillStatementsForMap, &ksd );
+  //isl_union_map_foreach_map( DEPS , &considerKillStatementsForMapNew, &ksd );
 
   LOGD << "old deps:" ;
   isl_union_map_dump( DEPS );
