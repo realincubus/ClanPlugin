@@ -743,6 +743,7 @@ std::vector<PetReductionVariableInfo> Dependences::find_reduction_variables( ){
 typedef std::pair<isl_set*, isl_schedule_node*> find_result;
 
 
+#if 0
 static isl_bool find_set_in_node( isl_schedule_node* node, void* user ) {
   find_result* fr = (find_result*)user;
   isl_set* set = fr->first;
@@ -751,6 +752,7 @@ static isl_bool find_set_in_node( isl_schedule_node* node, void* user ) {
   std::cout << "  type " << type << std::endl;
 
 }
+#endif
 
 static isl_bool find_set_in_schedule( isl_schedule_node* node, void* user ) {
 
@@ -781,7 +783,9 @@ static isl_bool find_set_in_schedule( isl_schedule_node* node, void* user ) {
     }else{
       LOGV << "not considering this node since it has to have subnodes" ;
     }
-  }else{
+  }
+#if 0
+  else{
     LOGD << " type of this schedule node is " << type ;
     isl_schedule_node_dump( node );
     if ( type == isl_schedule_node_band ) {
@@ -799,6 +803,7 @@ static isl_bool find_set_in_schedule( isl_schedule_node* node, void* user ) {
       isl_schedule_node_foreach_descendant_top_down( node, &find_set_in_node, user );
     }
   }
+#endif
   return isl_bool_true; 
 }
 
