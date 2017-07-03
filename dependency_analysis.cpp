@@ -1024,6 +1024,133 @@ void dump( isl_space* space ) {
   isl_space_dump ( space );
 }
 
+std::string isl_dim_to_str[] = { "isl_dim_cst", "isl_dim_param", " isl_dim_in", "isl_dim_out", "isl_dim_set/isl_dim_out", "isl_dim_div"};
+
+void print_map_information( isl_map* map ) {
+
+  std::cout << "information for :" << std::endl;
+  dump (map);
+
+  auto n_in = isl_map_n_in( map );
+  auto n_out = isl_map_n_out( map );
+  auto n_param = isl_map_n_param( map );
+
+  std::cout << "Dimensions:" << std::endl;
+
+  std::cout << "n in " << n_in << std::endl;
+  std::cout << "n out " << n_out << std::endl;
+  std::cout << "n param " << n_param << std::endl;
+
+  std::cout << "Dimensions of (): " << std::endl;
+  if ( n_in ){
+    std::cout << "dim in " << isl_map_dim( map, isl_dim_in ) << std::endl;
+  }
+
+  if( n_out ){
+    std::cout << "dim out " << isl_map_dim( map, isl_dim_out ) << std::endl;
+  }
+
+  if( n_param ){
+    std::cout << "dim param " << isl_map_dim( map, isl_dim_param ) << std::endl;
+  }
+
+  std::cout << "Dimension Names:" << std::endl;
+  for (int i = 0; i < n_in; ++i){
+    std::cout << "dim in " << isl_map_get_dim_name( map, isl_dim_in, i )<< std::endl;
+  }
+
+  for (int i = 0; i < n_out; ++i){
+    std::cout << "dim out " << isl_map_get_dim_name( map, isl_dim_out, i )<< std::endl;
+  }
+
+  for (int i = 0; i < n_param; ++i){
+    std::cout << "dim param " << isl_map_get_dim_name( map, isl_dim_param, i )<< std::endl;
+  }
+
+  std::cout << "Has tuple id ?: " << std::endl;
+  std::cout << "dim in(id) " << isl_map_has_tuple_id(map, isl_dim_in) << std::endl;
+  std::cout << "dim out(id) " << isl_map_has_tuple_id(map, isl_dim_out) << std::endl;
+  std::cout << "dim param(id) " << " not possible " << std::endl;
+
+}
+
+void print_space_information( isl_space* space, int recurse = 2 )
+{
+  
+  std::cout << "information for :" << std::endl;
+  dump (space);
+
+
+  auto is_wrapping = isl_space_is_wrapping(space);
+  auto is_domain_wrapping = isl_space_domain_is_wrapping(space);
+  auto is_range_wrapping = isl_space_range_is_wrapping(space);
+
+  std::cout << "is wrapping " << is_wrapping << std::endl;
+  std::cout << "is domain wrapping " << isl_space_domain_is_wrapping(space) << std::endl;
+  std::cout << "is range wrapping " << isl_space_range_is_wrapping(space) << std::endl;
+  std::cout << "can curry " << isl_space_can_curry(space) << std::endl;
+  std::cout << "can uncurry " << isl_space_can_uncurry(space) << std::endl;
+
+  if ( is_wrapping ){
+    std::cout << "unwrapping" << std::endl;
+    auto unwrapped = isl_space_unwrap( isl_space_copy(space) );
+    print_space_information( unwrapped );
+  }
+
+  auto can_curry = isl_space_can_curry(space);
+  auto can_uncurry = isl_space_can_uncurry(space);
+
+  if ( can_curry && recurse ) {
+    std::cout << "curring" << std::endl;
+    auto curried = isl_space_curry( isl_space_copy(space) );
+    print_space_information( curried, recurse-1 );
+  }
+
+  if ( can_uncurry && recurse ) {
+    std::cout << "uncurring" << std::endl;
+    auto uncurried = isl_space_uncurry( isl_space_copy(space) );
+    print_space_information( uncurried, recurse-1 );
+  }
+
+  auto can_zip = isl_space_can_zip( space );
+
+  std::cout << "can zip " << can_zip << std::endl;
+
+  std::cout << "Dimensions :" << std::endl;
+  int dims[isl_dim_all];
+  for (int i = 0; i < isl_dim_all; ++i){
+    dims[i] = isl_space_dim( space, (isl_dim_type)i);
+    std::cout << "dim i " << i << " " << dims[i] << std::endl;
+  }
+
+  std::cout << "Has ?: " << std::endl;
+  std::cout << "tuple name in "  << " "  << isl_space_has_tuple_name(space, isl_dim_in) << std::endl;
+  std::cout << "tuple name out "  << " "  << isl_space_has_tuple_name(space, isl_dim_out) << std::endl;
+  std::cout << "tuple name set "  << " "  << isl_space_has_tuple_name(space, isl_dim_set) << std::endl;
+
+  for (int j = 0; j < isl_dim_all; ++j){
+    std::cout << "type " << isl_dim_to_str[j] << std::endl;
+    for (int i = 0; i < dims[j]; ++i){
+      std::cout << "  has dim name " << isl_space_has_dim_name( space, (isl_dim_type)j, i) << std::endl;
+    }
+  }
+
+  auto has_tuple_name = [](isl_space* space, auto isl_dim ){
+    auto has_tuple_name = isl_space_has_tuple_name( space, isl_dim );
+    if ( has_tuple_name ) {
+      std::cout << "tuple name for type " << isl_dim_to_str[(int)isl_dim] << " " << isl_space_get_tuple_name( space, isl_dim ) << std::endl;
+    }
+  };
+
+  has_tuple_name( space, isl_dim_in );
+  has_tuple_name( space, isl_dim_out );
+  has_tuple_name( space, isl_dim_set );
+
+  std::cout  << std::endl;
+
+}
+
+
 using PlainCooridnates = std::pair<isl_map*, std::vector<int>>;
 
 PlainCooridnates extract_order ( isl_map* map ) {
@@ -1075,6 +1202,19 @@ PlainCooridnates extract_order ( isl_map* map ) {
 
   std::cout << "returning from " << __PRETTY_FUNCTION__ << std::endl;
   return ret;
+}
+
+
+template < typename T >
+isl_stat for_each_helper( T* element, void* user ){
+  auto& f = *((std::function<isl_stat(T*)>*)user);
+  isl_stat stat = f( element );
+  return stat;
+} 
+
+void for_each( isl_union_set* uset, std::function<isl_stat(isl_set*)> functor)
+{
+  isl_union_set_foreach_set( uset, &for_each_helper<isl_set>, (void*)&functor); 
 }
 
 static isl_stat considerKillStatementsForMapNew( isl_map* map, void* user ) {
@@ -1154,27 +1294,91 @@ static isl_stat considerKillStatementsForMapNew( isl_map* map, void* user ) {
   };
 
 
+  auto space = isl_map_get_space( map );
+  //print_space_information( space );
+  //dump ( space );
+
   auto source = get_source_from_map( isl_map_copy(map) );
   auto destination = get_destination_from_map( isl_map_copy(map) );
 
-  auto source_name = isl_set_get_tuple_name( source );
-  std::cout << "source name " << source_name << std::endl;
-  int begin = find_statement_by_name( source_name );
+  //print_space_information( isl_set_get_space( source ) );
+  //print_space_information( isl_set_get_space( destination ) );
 
-
-  auto destination_name = isl_set_get_tuple_name( destination );
-  std::cout << "destination name " << destination_name << std::endl;
-  int end = find_statement_by_name( source_name );
-
-  // TODO get the variable that is killed best is to do this from source or destionation
-    
-
-  // TODO for all kill statements find their indexes
- 
-  auto is_killed = [](int begin, int end){ 
-    
+  auto get_tuple_name_from_wrapped = [](isl_set* set){ 
+    auto space = isl_set_get_space( set );
+    if ( space ) {
+      isl_space* unwrapped_space = space;
+      auto dim_type = isl_dim_in;
+      if ( isl_space_is_wrapping( space ) ) {
+        unwrapped_space = isl_space_unwrap( space );
+      }else{
+        dim_type = isl_dim_out;
+      }
+      auto isl_tuple_name = isl_space_get_tuple_name( unwrapped_space, dim_type );
+      return isl_tuple_name;
+    }else{
+      std::cout << "FATAL: could not get the space for the set " << set << std::endl;
+    }
+    return (const char*)nullptr;
   };
-  
+
+  auto source_name = get_tuple_name_from_wrapped( source );
+  auto destination_name = get_tuple_name_from_wrapped( destination );
+
+  std::cout << "source " << source_name << " destination " << destination_name << std::endl;
+
+  isl_union_set* kill_domains = isl_union_map_domain( isl_union_map_copy( kill_statements ) );
+
+  auto is_killed = [&](isl_set* domain ){ 
+    bool is_kill = false;
+    // find out if this domain is a kill domain
+    for_each( kill_domains, [&](isl_set* kill_domain){ 
+      auto inter = isl_set_intersect( isl_set_copy(kill_domain), isl_set_copy(domain) ); 
+      if ( !isl_set_is_empty( inter ) ) {
+        is_kill = true;
+        return isl_stat_error; 
+      }
+      return isl_stat_ok;
+    } );
+    return is_kill; 
+  };
+
+  bool found_source = false;
+
+  auto from_source_to_destination = [&](auto source, auto destination, auto plain_coordinates ){ 
+    for( auto& plain_coordinate : plain_coordinates ){
+      auto statement = plain_coordinate.first;
+      auto domain = isl_map_domain( statement );
+      auto tuple_name = get_tuple_name_from_wrapped( domain ); 
+      std::cout << "tuple_name " << tuple_name << std::endl;
+
+      if ( std::string(tuple_name) == std::string(source) ) {
+        found_source = true;
+        continue;
+      }
+
+      // if we found the source and we are now
+      // heading to the destination statement
+      if ( found_source ) {
+        if ( std::string(tuple_name) == std::string(destination) ) {
+          break;
+        }
+        // if this is a kill statement for this dependency 
+        if ( is_killed( domain ) ) {
+          return tuple_name;
+        }
+      }
+    }
+    return (const char*)nullptr;
+  };
+
+  auto was_killed = from_source_to_destination( source_name, destination_name, plain_coordinates );
+
+  if ( was_killed == nullptr ) {
+    isl_union_map_add_map( new_map, map );
+  }else{
+    std::cout << "dependency from " << source_name << " to " << destination_name << " was killed" << std::endl;
+  }
 
   return isl_stat_ok;
 }
@@ -1266,8 +1470,8 @@ isl_union_map* Dependences::considerKillStatements( isl_union_map* DEPS,
   isl_union_map* new_deps = isl_union_map_empty( space );
   KillStatementsData ksd = std::make_tuple( schedule, writes, kill_statements, new_deps );
   // iterate over all dependencies
-  isl_union_map_foreach_map( DEPS , &considerKillStatementsForMap, &ksd );
-  //isl_union_map_foreach_map( DEPS , &considerKillStatementsForMapNew, &ksd );
+  //isl_union_map_foreach_map( DEPS , &considerKillStatementsForMap, &ksd );
+  isl_union_map_foreach_map( DEPS , &considerKillStatementsForMapNew, &ksd );
 
   LOGD << "old deps:" ;
   isl_union_map_dump( DEPS );
