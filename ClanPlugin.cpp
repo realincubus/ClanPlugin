@@ -272,7 +272,6 @@ class Callback : public MatchFinder::MatchCallback {
     }
 
     ~Callback(){
-	enter_callback->getHeaderSet().clear();
     }
 
     using replacement_t = std::tuple<SourceLocation, SourceRange, std::string, std::set<std::string>, double>;
