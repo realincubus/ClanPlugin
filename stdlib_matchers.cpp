@@ -123,8 +123,8 @@ inline std::string getString(const SourceRange sr, const SourceManager &SM) {
 
 template <typename T>
 inline std::string getString(const T *node, const SourceManager &SM) {
-  SourceLocation expr_start = node->getLocStart();
-  SourceLocation expr_end = node->getLocEnd();
+  SourceLocation expr_start = node->getBeginLoc();
+  SourceLocation expr_end = node->getEndLoc();
   return Lexer::getSourceText(
       CharSourceRange::getTokenRange(SourceRange(expr_start, expr_end)), SM,
       LangOptions());
@@ -268,7 +268,7 @@ class SequentialAlgorithmCallback : public MatchFinder::MatchCallback {
 
 	auto& diag = context.getDiagnostics();
 	unsigned DiagID = diag.getCustomDiagID(DiagnosticsEngine::Warning, "this can be replaced with std::accumulate");
-	diag.Report(for_stmt->getLocStart(), DiagID) 
+	diag.Report(for_stmt->getBeginLoc(), DiagID) 
 	  << FixItHint::CreateReplacement(for_stmt->getSourceRange(), replacement.c_str() );
 
      }

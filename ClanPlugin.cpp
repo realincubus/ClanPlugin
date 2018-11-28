@@ -295,8 +295,8 @@ class Callback : public MatchFinder::MatchCallback {
            if ( clan_options.use_profile_data ) {
              // check wether the source code range of this for_stmt contains
              // a profile result
-             auto begin = for_stmt->getLocStart();	
-             auto end = for_stmt->getLocEnd();	
+             auto begin = for_stmt->getBeginLoc();	
+             auto end = for_stmt->getEndLoc();	
 
              auto begin_str = begin.printToString(SM);	
              auto end_str = end.printToString(SM);	
@@ -326,7 +326,7 @@ class Callback : public MatchFinder::MatchCallback {
              
            }
 
-	   auto loc = for_stmt->getLocStart();
+	   auto loc = for_stmt->getBeginLoc();
 	   if ( SM.isInMainFile( loc ) ) {
 
 	     function_decl->dumpColor();
@@ -344,11 +344,11 @@ class Callback : public MatchFinder::MatchCallback {
 	       auto statement_texts = cp_interface.get_statement_texts( scop );
 
 	       reporter_function warning_reporter = [&](unsigned int offset, std::string message){
-		  FileID fid = SM.getFileID( for_stmt->getLocStart() );
+		  FileID fid = SM.getFileID( for_stmt->getBeginLoc() );
 		  report_warning(fid,context,offset,message);
 	       };
 	       reporter_function error_reporter = [&](unsigned int offset, std::string message){
-		  FileID fid = SM.getFileID( for_stmt->getLocStart() );
+		  FileID fid = SM.getFileID( for_stmt->getBeginLoc() );
 		  report_error(fid,context,offset,message);
 	       };
 

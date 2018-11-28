@@ -152,7 +152,7 @@ public:
 	// check all operator calls for dereferences of iterators
 	bool VisitCXXOperatorCallExpr( const CXXOperatorCallExpr* cxx_operator_call_expr ) {
 
-		auto loc_start = cxx_operator_call_expr->getLocStart();
+		auto loc_start = cxx_operator_call_expr->getBeginLoc();
     if ( SM.isBeforeInTranslationUnit( loc_start , begin ) ) return true;
     if ( SM.isBeforeInTranslationUnit( end , loc_start ) ) return true;
 
@@ -187,7 +187,7 @@ public:
 
   bool VisitDeclRefExpr( const DeclRefExpr* declRefExpr ) {
 
-    auto decl_ref_loc_start = declRefExpr->getLocStart();
+    auto decl_ref_loc_start = declRefExpr->getBeginLoc();
     if ( SM.isBeforeInTranslationUnit( decl_ref_loc_start , begin ) ) return true;
     if ( SM.isBeforeInTranslationUnit( end , decl_ref_loc_start ) ) return true;
 
@@ -362,7 +362,7 @@ public:
 
   bool VisitStmt( const Stmt* stmt ) {
 
-    auto stmt_loc_start = stmt->getLocStart();
+    auto stmt_loc_start = stmt->getBeginLoc();
     if ( SM.isBeforeInTranslationUnit( stmt_loc_start , begin ) ) return true;
     if ( SM.isBeforeInTranslationUnit( end , stmt_loc_start ) ) return true;
 
@@ -463,11 +463,11 @@ std::tuple<std::string,std::string,std::string> ClangPetInterface::get_comments(
 	}else{
 	  // get the previous statement and get its end
 	  auto previous = *(parent->body_begin() + (position-1));
-	  begin_previous_text = previous->getLocEnd();
+	  begin_previous_text = previous->getEndLoc();
 	  // TODO correct this to be on the next line if we are not also on the same line as previous 
 	}
 	
-	end_previous_text = stmt->getLocStart();
+	end_previous_text = stmt->getBeginLoc();
 	previous_text = Lexer::getSourceText(
 	  CharSourceRange::getCharRange(
 	    SourceRange(
@@ -483,7 +483,7 @@ std::tuple<std::string,std::string,std::string> ClangPetInterface::get_comments(
       }
 
       {
-	SourceLocation begin_following_text = stmt->getLocEnd();
+	SourceLocation begin_following_text = stmt->getEndLoc();
 	SourceLocation end_following_text;
 
 	if ( position == parent->size()-1 ) {
@@ -494,7 +494,7 @@ std::tuple<std::string,std::string,std::string> ClangPetInterface::get_comments(
 	}else{
 	  // get the following statement and get its end
 	  auto following = *(parent->body_begin() + (position+1));
-	  end_following_text = following->getLocEnd();
+	  end_following_text = following->getEndLoc();
 	}
 	
 	following_text = Lexer::getSourceText(
@@ -742,6 +742,6 @@ ClangPetInterface::ClangPetInterface(clang::ASTContext& _ctx, const clang::ForSt
   SM(ctx_clang.getSourceManager()),
   for_stmt(_for_stmt)
 {
-   FileID fid = SM.getFileID( for_stmt->getLocStart() );
+   FileID fid = SM.getFileID( for_stmt->getBeginLoc() );
    sloc_file = SM.translateLineCol(fid,1,1);
 }
